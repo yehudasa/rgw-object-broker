@@ -1,5 +1,5 @@
 hash: 1b3981adc58fd30b248cdd50790940be152712dc5325d4f081d4368086cb42e8
-updated: 2017-09-08T13:30:28.141241783-05:00
+updated: 2017-09-08T13:40:54.667919092-05:00
 imports:
 - name: github.com/davecgh/go-spew
   version: 5215b55f46b2b919f50a1df0eaa5886afe4e3b3d
@@ -42,8 +42,6 @@ imports:
   version: 44145f04b68cf362d9c4df2182967c2275eaefed
 - name: github.com/google/gofuzz
   version: 44d81051d367757e1c7c6a5a86423ece9afcf63c
-- name: github.com/gorilla/context
-  version: 215affda49addc4c8ef7e2534915df2c8c35c6cd
 - name: github.com/gorilla/mux
   version: bcd8bc72b08df0f70df986b97f95590779502d31
 - name: github.com/juju/ratelimit

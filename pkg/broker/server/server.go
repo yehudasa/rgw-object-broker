@@ -26,6 +26,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/dynamic-gluster-obj-broker/pkg/broker/s3-broker"
 	"github.com/kubernetes-incubator/service-catalog/pkg/brokerapi"
+	"github.com/kubernetes-incubator/service-catalog/pkg/util"
 )
 
 type server struct {

@@ -1340,7 +1340,7 @@ The package still computes Go package information
 but it does not run the build: the <code>Cmd</code> and <code>Script</code>
 types are gone.
 (To build code, use the new
-<a href="/cmd/go/"><code>go</code></a> command instead.)
+<a href="/main/go/"><code>go</code></a> command instead.)
 The <code>DirInfo</code> type is now named
 <a href="/pkg/go/build/#Package"><code>Package</code></a>.
 <code>FindTree</code> and <code>ScanDir</code> are replaced by
@@ -2159,7 +2159,7 @@ The semantic changes make it difficult for the fix tool to update automatically.
 <h2 id="cmd_go">The go command</h2>
 
 <p>
-Go 1 introduces the <a href="/cmd/go/">go command</a>, a tool for fetching,
+Go 1 introduces the <a href="/main/go/">go command</a>, a tool for fetching,
 building, and installing Go packages and commands. The <code>go</code> command
 does away with makefiles, instead using Go source code to find dependencies and
 determine build conditions. Most existing Go programs will no longer require
@@ -2168,7 +2168,7 @@ makefiles to be built.
 
 <p>
 See <a href="/doc/code.html">How to Write Go Code</a> for a primer on the
-<code>go</code> command and the <a href="/cmd/go/">go command documentation</a>
+<code>go</code> command and the <a href="/main/go/">go command documentation</a>
 for the full details.
 </p>
 
@@ -2183,7 +2183,7 @@ necessary, rewrite their makefiles to perform any auxiliary build tasks.
 <h2 id="cmd_cgo">The cgo command</h2>
 
 <p>
-In Go 1, the <a href="/cmd/cgo">cgo command</a>
+In Go 1, the <a href="/main/cgo">cgo command</a>
 uses a different <code>_cgo_export.h</code>
 file, which is generated for packages containing <code>//export</code> lines.
 The <code>_cgo_export.h</code> file now begins with the C preamble comment,
