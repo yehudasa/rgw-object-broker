@@ -1,0 +1,20 @@
+package: github.com/dynamic-gluster-obj-broker
+import:
+- package: github.com/golang/glog
+- package: github.com/gorilla/mux
+  version: ^1.4.0
+- package: github.com/kubernetes-incubator/service-catalog
+  version: ^0.0.19
+  subpackages:
+  - pkg/brokerapi
+- package: github.com/minio/minio-go
+  version: ^3.0.2
+- package: k8s.io/apimachinery
+  subpackages:
+  - pkg/apis/meta/v1
+- package: k8s.io/client-go
+  version: ^4.0.0
+  subpackages:
+  - kubernetes
+  - pkg/api/v1
+  - rest
