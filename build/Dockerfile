@@ -14,6 +14,6 @@
 
 FROM debian:jessie 
 
-ADD s3-broker /opt/services/s3-broker
+ADD cns-obj-broker /opt/services/cns-obj-broker
 
-ENTRYPOINT ["/opt/services/s3-broker", "-alsologtostderr=true"]
+ENTRYPOINT ["/opt/services/cns-obj-broker", "-alsologtostderr=true"]
