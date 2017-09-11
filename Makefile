@@ -34,15 +34,18 @@ push:
 
 # push IMAGE:$(VERSION). Intended to release stable image built from master branch.
 release:
+	git fetch origin
 ifneq ($(shell git rev-parse --abbrev-ref HEAD), master)
 	$(error Release is intended to be run on master branch. Please checkout master and retry.)
 endif
-	git fetch origin
-ifneq ($(shell git rev-list HEAD..origin/master), 0)
-	$(error Current master is behind origin.  Please update local master before releasing.)
+ifneq ($(shell git rev-list HEAD..origin/master --count), 0)
+	$(error HEAD is behind origin/master -- $(shell git status -sb --porcelain))
 endif
-#	docker tag $(IMAGE) $(REGISTRY)/$(IMAGE):$(VERSION)
-#	gcloud docker -- push $(REGISTRY)/$(IMAGE)
+ifneq ($(shell git rev-list origin/master..HEAD --count), 0)
+	$(error HEAD is ahead of origin/master --  $(shell git status -sb --porcelain))
+endif
+	docker tag $(IMAGE) $(REGISTRY)/$(IMAGE):$(VERSION)
+	gcloud docker -- push $(REGISTRY)/$(IMAGE)
 
 clean:
 	rm -rf $(BIN_DIR)/*
