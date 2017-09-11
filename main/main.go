@@ -27,8 +27,8 @@ import (
 	"syscall"
 
 	"github.com/golang/glog"
-	"github.com/dynamic-gluster-obj-broker/pkg/broker/s3-broker"
-	"github.com/dynamic-gluster-obj-broker/pkg/broker/server"
+	"github.com/cns-object-broker/pkg/broker/s3-broker"
+	"github.com/cns-object-broker/pkg/broker/server"
 )
 
 var options struct {
