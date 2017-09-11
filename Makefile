@@ -5,7 +5,8 @@ PKG_DIR=$(REPO_ROOT)/main
 BUILD_DIR=$(REPO_ROOT)/build
 
 # DOCKER TAG VARS
-REGISTRY=gcr.io/openshift-gce-devel
+#REGISTRY=gcr.io/openshift-gce-devel
+REGISTRY=jcoperh/cns-obj-broker
 IMAGE=cns-obj-broker
 DIRTY_HASH=$(shell git describe --always --abbrev=7 --dirty)
 VERSION=v1
@@ -28,12 +29,22 @@ image: $(BUILD_DIR)/Dockerfile
 	docker tag $(IMAGE) $(REGISTRY)/$(IMAGE):$(DIRTY_HASH)
 	rm -rf $(TEMP_BUILD_DIR)
 
-# push IMAGE:$(DIRTY_HASH). Intended to push wip broker built from non-master branch.
+# push IMAGE:$(DIRTY_HASH). Intended to push broker built from non-master / working branch.
 push:
 	gcloud docker -- push $(REGISTRY)/$(IMAGE):$(DIRTY_HASH)
 
 # push IMAGE:$(VERSION). Intended to release stable image built from master branch.
 release:
+	git fetch origin
+ifneq ($(shell git rev-parse --abbrev-ref HEAD), master)
+	$(error Release is intended to be run on master branch. Please checkout master and retry.)
+endif
+ifneq ($(shell git rev-list HEAD..origin/add-build-deploy-utils --count), 0)
+	$(error HEAD is behind origin/master -- $(shell git status -sb --porcelain))
+endif
+ifneq ($(shell git rev-list origin/add-build-deploy-utils..HEAD --count), 0)
+	$(error HEAD is ahead of origin/master --  $(shell git status -sb --porcelain))
+endif
 	docker tag $(IMAGE) $(REGISTRY)/$(IMAGE):$(VERSION)
 	gcloud docker -- push $(REGISTRY)/$(IMAGE)
 
