@@ -28,14 +28,21 @@ image: $(BUILD_DIR)/Dockerfile
 	docker tag $(IMAGE) $(REGISTRY)/$(IMAGE):$(DIRTY_HASH)
 	rm -rf $(TEMP_BUILD_DIR)
 
-# push IMAGE:$(DIRTY_HASH). Intended to push wip broker built from non-master branch.
+# push IMAGE:$(DIRTY_HASH). Intended to push broker built from non-master / working branch.
 push:
 	gcloud docker -- push $(REGISTRY)/$(IMAGE):$(DIRTY_HASH)
 
 # push IMAGE:$(VERSION). Intended to release stable image built from master branch.
 release:
-	docker tag $(IMAGE) $(REGISTRY)/$(IMAGE):$(VERSION)
-	gcloud docker -- push $(REGISTRY)/$(IMAGE)
+ifneq ($(shell git rev-parse --abbrev-ref HEAD), master)
+	$(error Release is intended to be run on master branch. Please checkout master and retry.)
+endif
+	git fetch origin
+ifneq ($(shell git rev-list HEAD..origin/master), 0)
+	$(error Current master is behind origin.  Please update local master before releasing.)
+endif
+#	docker tag $(IMAGE) $(REGISTRY)/$(IMAGE):$(VERSION)
+#	gcloud docker -- push $(REGISTRY)/$(IMAGE)
 
 clean:
 	rm -rf $(BIN_DIR)/*
