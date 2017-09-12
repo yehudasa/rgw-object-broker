@@ -1,0 +1,10 @@
+apiVersion: servicecatalog.k8s.io/v1alpha1
+kind: ServiceInstance
+metadata:
+  name: cns-obj-instance
+  namespace: test-ns
+spec:
+  serviceClassName: cns-object-bucket 
+  planName: default
+  parameters:
+    bucketName: "bucket-demo-123" # Required

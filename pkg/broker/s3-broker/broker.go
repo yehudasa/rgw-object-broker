@@ -30,7 +30,6 @@ import (
 	k8sRest "k8s.io/client-go/rest"
 )
 
-
 type s3ServiceInstance struct {
 	// k8s namespace
 	Namespace string
@@ -47,7 +46,7 @@ type s3Broker struct {
 	s3Client *minio.Client
 	// s3 server ip and port
 	s3url string // includes ":port"
-	s3ID string
+	s3ID  string
 	s3Pwd string
 	// client used to access kubernetes
 	kubeClient *clientset.Clientset
@@ -115,8 +114,8 @@ func CreateBroker() Broker {
 		s3Client:    s3c,
 		s3url:       s3endpoint,
 		kubeClient:  cs,
-		s3ID: fmt.Sprintf("%s:%s", acct, user),
-		s3Pwd: pass,
+		s3ID:        fmt.Sprintf("%s:%s", acct, user),
+		s3Pwd:       pass,
 	}
 }
 
@@ -124,9 +123,9 @@ func (b *s3Broker) Catalog() (*brokerapi.Catalog, error) {
 	return &brokerapi.Catalog{
 		Services: []*brokerapi.Service{
 			{
-				Name:        "gluster-object-store",
+				Name:        "cns-object-bucket",
 				ID:          "0",
-				Description: "An object bucket backed by GlusterFS Object Storage.",
+				Description: "A bucket of storage object backed by CNS.",
 				Bindable:    true,
 				Plans: []brokerapi.ServicePlan{
 					{
