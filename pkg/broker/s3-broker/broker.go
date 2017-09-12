@@ -123,7 +123,7 @@ func (b *s3Broker) Catalog() (*brokerapi.Catalog, error) {
 	return &brokerapi.Catalog{
 		Services: []*brokerapi.Service{
 			{
-				Name:        "cns-object-bucket",
+				Name:        "cns-bucket-service",
 				ID:          "0",
 				Description: "A bucket of storage object backed by CNS.",
 				Bindable:    true,

@@ -1,6 +1,6 @@
 apiVersion: servicecatalog.k8s.io/v1alpha1
 kind: ServiceBroker
 metadata:
-  name: cns-obj-service-broker
+  name: cns-bucket-broker
 spec:
-  url: http://35.202.108.118:32483
+  url: http://35.202.108.118:30011
