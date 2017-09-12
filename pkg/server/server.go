@@ -24,18 +24,18 @@ import (
 
 	"github.com/golang/glog"
 	"github.com/gorilla/mux"
-	"github.com/cns-object-broker/pkg/broker/s3-broker"
+	"github.com/cns-object-broker/pkg/broker"
 	"github.com/kubernetes-incubator/service-catalog/pkg/brokerapi"
 	"github.com/kubernetes-incubator/service-catalog/pkg/util"
 )
 
 type server struct {
-	broker s3_broker.Broker
+	broker broker.Broker
 }
 
 // CreateHandler creates Broker HTTP handler based on an implementation
 // of a broker.Broker interface.
-func createHandler(b s3_broker.Broker) http.Handler {
+func createHandler(b broker.Broker) http.Handler {
 	s := server{
 		broker: b,
 	}
@@ -54,7 +54,7 @@ func createHandler(b s3_broker.Broker) http.Handler {
 
 // Start creates the HTTP handler based on an implementation of a
 // broker.Broker interface, and begins to listen on the specified port.
-func Run(ctx context.Context, addr string, b s3_broker.Broker) error {
+func Run(ctx context.Context, addr string, b broker.Broker) error {
 	glog.Infof("Starting server on %v\n", addr)
 	srv := http.Server{
 		Addr:    addr,

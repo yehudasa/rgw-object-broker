@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package s3_broker
+package broker
 
 import (
 	"fmt"
@@ -30,18 +30,25 @@ import (
 	k8sRest "k8s.io/client-go/rest"
 )
 
-type s3ServiceInstance struct {
+const (
+	BUCKET_ENDPOINT = "bucketEndpoint"
+	BUCKET_NAME     = "bucketName"
+	BUCKET_ID       = "bucketID"
+	BUCKET_PWORD    = "bucketPword"
+)
+
+type serviceInstance struct {
 	// k8s namespace
 	Namespace string
 	// binding credential created during Bind()
 	Credential brokerapi.Credential // s3 server url, includes port and bucket name
 }
 
-type s3Broker struct {
+type broker struct {
 	// rwMutex controls concurrent R and RW access
 	rwMutex sync.RWMutex
 	// instanceMap maps instanceIDs to the ID's userProvidedServiceInstance values
-	instanceMap map[string]*s3ServiceInstance
+	instanceMap map[string]*serviceInstance
 	// client used to access s3 API
 	s3Client *minio.Client
 	// s3 server ip and port
@@ -55,7 +62,7 @@ type s3Broker struct {
 // CreateBroker initializes the service broker. This function is called by server.Start()
 func CreateBroker() Broker {
 	const S3_BROKER_POD_LABEL = "glusterfs=s3-pod"
-	var instanceMap = make(map[string]*s3ServiceInstance)
+	var instanceMap = make(map[string]*serviceInstance)
 	glog.Info("Generating new broker.")
 	s3ip, err := getExternalIP()
 	if err != nil {
@@ -109,7 +116,7 @@ func CreateBroker() Broker {
 		glog.Fatalf("failed to get minio-s3 client: %v\n", err)
 	}
 	glog.Infof("New Broker for s3 endpoint: %s", s3endpoint)
-	return &s3Broker{
+	return &broker{
 		instanceMap: instanceMap,
 		s3Client:    s3c,
 		s3url:       s3endpoint,
@@ -119,7 +126,7 @@ func CreateBroker() Broker {
 	}
 }
 
-func (b *s3Broker) Catalog() (*brokerapi.Catalog, error) {
+func (b *broker) Catalog() (*brokerapi.Catalog, error) {
 	return &brokerapi.Catalog{
 		Services: []*brokerapi.Service{
 			{
@@ -140,21 +147,15 @@ func (b *s3Broker) Catalog() (*brokerapi.Catalog, error) {
 	}, nil
 }
 
-func (b *s3Broker) GetServiceInstanceLastOperation(instanceID, serviceID, planID, operation string) (*brokerapi.LastOperationResponse, error) {
+func (b *broker) GetServiceInstanceLastOperation(instanceID, serviceID, planID, operation string) (*brokerapi.LastOperationResponse, error) {
 	glog.Info("GetServiceInstanceLastOperation not yet implemented.")
 	return nil, nil
 }
 
-func (b *s3Broker) CreateServiceInstance(instanceID string, req *brokerapi.CreateServiceInstanceRequest) (*brokerapi.CreateServiceInstanceResponse, error) {
+func (b *broker) CreateServiceInstance(instanceID string, req *brokerapi.CreateServiceInstanceRequest) (*brokerapi.CreateServiceInstanceResponse, error) {
 	glog.Info("CreateServiceInstance called.  instanceID: %s", instanceID)
 	b.rwMutex.Lock()
 	defer b.rwMutex.Unlock()
-	const (
-		BUCKET_ENDPOINT = "bucketEndpoint"
-		BUCKET_NAME     = "bucketName"
-		BUCKET_ID       = "bucketID"
-		BUCKET_PWORD    = "bucketPword"
-	)
 	// does service instance exist?
 	if _, ok := b.instanceMap[instanceID]; ok {
 		return nil, fmt.Errorf("ServiceInstance %q already exists", instanceID)
@@ -170,7 +171,7 @@ func (b *s3Broker) CreateServiceInstance(instanceID string, req *brokerapi.Creat
 	if err != nil {
 		return nil, fmt.Errorf("Failed to provision bucket <%s>: %v", bucketName, err)
 	}
-	b.instanceMap[instanceID] = &s3ServiceInstance{
+	b.instanceMap[instanceID] = &serviceInstance{
 		Namespace: req.ContextProfile.Namespace,
 		Credential: brokerapi.Credential{
 			BUCKET_NAME:     bucketName,
@@ -182,13 +183,22 @@ func (b *s3Broker) CreateServiceInstance(instanceID string, req *brokerapi.Creat
 	return nil, nil
 }
 
-// TODO
-func (b *s3Broker) RemoveServiceInstance(instanceID, serviceID, planID string, acceptsIncomplete bool) (*brokerapi.DeleteServiceInstanceResponse, error) {
-	glog.Info("RemoveServiceInstance not yet implemented.")
+func (b *broker) RemoveServiceInstance(instanceID, serviceID, planID string, acceptsIncomplete bool) (*brokerapi.DeleteServiceInstanceResponse, error) {
+	glog.Info("RemoveServiceInstance called. instanceID: %s", instanceID)
+	b.rwMutex.Lock()
+	defer b.rwMutex.Unlock()
+	instance, ok := b.instanceMap[instanceID]
+	if ! ok {
+		return nil, fmt.Errorf("Broker cannot find instanceID %q.", instanceID)
+	}
+	if err := b.s3Client.RemoveBucket(instance.Credential[BUCKET_NAME].(string)); err != nil {
+		return nil, fmt.Errorf("S3 Client errored while removing bucket: %v", err)
+	}
+	delete(b.instanceMap, BUCKET_NAME)
 	return nil, nil
 }
 
-func (b *s3Broker) Bind(instanceID, bindingID string, req *brokerapi.BindingRequest) (*brokerapi.CreateServiceBindingResponse, error) {
+func (b *broker) Bind(instanceID, bindingID string, req *brokerapi.BindingRequest) (*brokerapi.CreateServiceBindingResponse, error) {
 	instance, ok := b.instanceMap[instanceID]
 	if ! ok {
 		return nil, fmt.Errorf("Instance ID %q not found.", instanceID)
@@ -203,12 +213,12 @@ func (b *s3Broker) Bind(instanceID, bindingID string, req *brokerapi.BindingRequ
 }
 
 // nothing to do here
-func (b *s3Broker) UnBind(instanceID, bindingID, serviceID, planID string) error {
+func (b *broker) UnBind(instanceID, bindingID, serviceID, planID string) error {
 	glog.Info("UnBind not yet implemented.")
 	return nil
 }
 
-func (b *s3Broker) provisionBucket(bucket string) error {
+func (b *broker) provisionBucket(bucket string) error {
 	glog.Infof("provisionBucket(name: %q).", bucket)
 	location := "" // ignored for now...
 	// check if bucket already exists
