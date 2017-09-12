@@ -31,6 +31,13 @@ image: $(BUILD_DIR)/Dockerfile
 # push IMAGE:$(DIRTY_HASH). Intended to push broker built from non-master / working branch.
 push:
 	gcloud docker -- push $(REGISTRY)/$(IMAGE):$(DIRTY_HASH)
+	@echo ""
+	@echo "-- Pushed image:"
+	@echo ""
+	@echo "        $(REGISTRY)/$(IMAGE):$(DIRTY_HASH)"
+	@echo ""
+	@echo "-- Be sure to update chart/values.yaml!"
+	@echo ""
 
 # push IMAGE:$(VERSION). Intended to release stable image built from master branch.
 release:
