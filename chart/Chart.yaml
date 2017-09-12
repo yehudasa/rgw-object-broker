@@ -1,3 +1,3 @@
-name: s3-broker
-description: s3-provided service-broker deployment Helm chart.
+name: cns-object-broker
+description: CNS backed object storage broker deployed by Helm.
 version: 0.0.1
