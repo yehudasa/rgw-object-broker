@@ -72,7 +72,7 @@ func Run(ctx context.Context, addr string, b broker.Broker) error {
 }
 
 func (s *server) catalog(w http.ResponseWriter, r *http.Request) {
-	glog.Infof("Getting Service Broker Catalog...")
+	glog.Infof("Server: catalog")
 
 	if result, err := s.broker.Catalog(); err == nil {
 		util.WriteResponse(w, http.StatusOK, result)
@@ -82,13 +82,12 @@ func (s *server) catalog(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) getServiceInstanceLastOperation(w http.ResponseWriter, r *http.Request) {
+	glog.Info("Server: getServiceInstanceLastOperation")
 	instanceID := mux.Vars(r)["instance_id"]
 	q := r.URL.Query()
 	serviceID := q.Get("service_id")
 	planID := q.Get("plan_id")
 	operation := q.Get("operation")
-	glog.Infof("Getting ServiceInstance ... %s\n", instanceID)
-
 	if result, err := s.broker.GetServiceInstanceLastOperation(instanceID, serviceID, planID, operation); err == nil {
 		util.WriteResponse(w, http.StatusOK, result)
 	} else {
@@ -97,8 +96,8 @@ func (s *server) getServiceInstanceLastOperation(w http.ResponseWriter, r *http.
 }
 
 func (s *server) createServiceInstance(w http.ResponseWriter, r *http.Request) {
+	glog.Info("Server: createServiceInstance")
 	id := mux.Vars(r)["instance_id"]
-	glog.Infof("Creating ServiceInstance %s...\n", id)
 
 	var req brokerapi.CreateServiceInstanceRequest
 	if err := util.BodyToObject(r, &req); err != nil {
@@ -122,13 +121,12 @@ func (s *server) createServiceInstance(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) removeServiceInstance(w http.ResponseWriter, r *http.Request) {
+	glog.Info("Server: removeServiceInstance")
 	instanceID := mux.Vars(r)["instance_id"]
 	q := r.URL.Query()
 	serviceID := q.Get("service_id")
 	planID := q.Get("plan_id")
 	acceptsIncomplete := q.Get("accepts_incomplete") == "true"
-	glog.Infof("Removing ServiceInstance %s...\n", instanceID)
-
 	if result, err := s.broker.RemoveServiceInstance(instanceID, serviceID, planID, acceptsIncomplete); err == nil {
 		util.WriteResponse(w, http.StatusOK, result)
 	} else {
@@ -137,13 +135,11 @@ func (s *server) removeServiceInstance(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) bind(w http.ResponseWriter, r *http.Request) {
+	glog.Info("Server: bind")
 	bindingID := mux.Vars(r)["binding_id"]
 	instanceID := mux.Vars(r)["instance_id"]
 
-	glog.Infof("Bind binding_id=%s, instance_id=%s\n", bindingID, instanceID)
-
 	var req brokerapi.BindingRequest
-
 	if err := util.BodyToObject(r, &req); err != nil {
 		glog.Errorf("Failed to unmarshall request: %v", err)
 		util.WriteErrorResponse(w, http.StatusBadRequest, err)
@@ -168,13 +164,12 @@ func (s *server) bind(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) unBind(w http.ResponseWriter, r *http.Request) {
+	glog.Info("Server: unbind")
 	instanceID := mux.Vars(r)["instance_id"]
 	bindingID := mux.Vars(r)["binding_id"]
 	q := r.URL.Query()
 	serviceID := q.Get("service_id")
 	planID := q.Get("plan_id")
-	glog.Infof("UnBind: Service instance guid: %s:%s", bindingID, instanceID)
-
 	if err := s.broker.UnBind(instanceID, bindingID, serviceID, planID); err == nil {
 		w.WriteHeader(http.StatusOK)
 		w.Header().Set("Content-Type", "application/json")

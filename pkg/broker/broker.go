@@ -153,23 +153,32 @@ func (b *broker) GetServiceInstanceLastOperation(instanceID, serviceID, planID, 
 }
 
 func (b *broker) CreateServiceInstance(instanceID string, req *brokerapi.CreateServiceInstanceRequest) (*brokerapi.CreateServiceInstanceResponse, error) {
-	glog.Info("CreateServiceInstance called.  instanceID: %s", instanceID)
+	glog.Infof("CreateServiceInstance called.  instanceID: %s", instanceID)
 	b.rwMutex.Lock()
 	defer b.rwMutex.Unlock()
 	// does service instance exist?
 	if _, ok := b.instanceMap[instanceID]; ok {
+		glog.Errorf("Instance requested already exists.")
 		return nil, fmt.Errorf("ServiceInstance %q already exists", instanceID)
 	}
 	// Check required parameter "bucketName"
 	bucketName, ok := req.Parameters["bucketName"].(string)
 	if ! ok {
+		glog.Errorf("Bucket name not provided in request parameters.")
 		return nil, fmt.Errorf("Paramters[\"bucketName\"] not provided.  Please define a bucket name.")
 	}
-	glog.Info("Creating new bucket: %q for instance %q.", bucketName, instanceID)
+	glog.Infof("Creating new bucket: %q for instance %q.", bucketName, instanceID)
 	// create new service instance
-	err := b.provisionBucket(bucketName)
+	exists, err := b.checkBucketExists(bucketName)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to provision bucket <%s>: %v", bucketName, err)
+		return nil, fmt.Errorf("Error occured while checking bucket name availability.")
+	}
+	if exists {
+		glog.Errorf("Bucket name unavailable: %q already exists.", bucketName)
+		return nil, fmt.Errorf("Bucket name unavailable: %q already exists.", bucketName)
+	}
+	if err := b.provisionBucket(bucketName); err != nil {
+		return nil, err
 	}
 	b.instanceMap[instanceID] = &serviceInstance{
 		Namespace: req.ContextProfile.Namespace,
@@ -184,31 +193,45 @@ func (b *broker) CreateServiceInstance(instanceID string, req *brokerapi.CreateS
 }
 
 func (b *broker) RemoveServiceInstance(instanceID, serviceID, planID string, acceptsIncomplete bool) (*brokerapi.DeleteServiceInstanceResponse, error) {
-	glog.Info("RemoveServiceInstance called. instanceID: %s", instanceID)
+	glog.Infof("RemoveServiceInstance called. instanceID: %s", instanceID)
 	b.rwMutex.Lock()
 	defer b.rwMutex.Unlock()
 	instance, ok := b.instanceMap[instanceID]
 	if ! ok {
+		glog.Errorf("InstanceID %q not found.", instanceID)
 		return nil, fmt.Errorf("Broker cannot find instanceID %q.", instanceID)
 	}
-	if err := b.s3Client.RemoveBucket(instance.Credential[BUCKET_NAME].(string)); err != nil {
-		return nil, fmt.Errorf("S3 Client errored while removing bucket: %v", err)
+	bucketName := instance.Credential[BUCKET_NAME].(string)
+	exists, err := b.checkBucketExists(bucketName)
+	if err != nil {
+		return nil, fmt.Errorf("Error checking if bucket exists: %v", err)
+	}
+	if exists {
+		glog.Infof("Removing bucket %q", bucketName)
+		if err := b.s3Client.RemoveBucket(bucketName); err != nil {
+			glog.Errorf("Error during RemoveBucket: %v", err)
+			return nil, fmt.Errorf("S3 Client errored while removing bucket: %v", err)
+		}
 	}
 	delete(b.instanceMap, BUCKET_NAME)
+	glog.Infof("Remove bucket %q succeeded.", bucketName)
 	return nil, nil
 }
 
 func (b *broker) Bind(instanceID, bindingID string, req *brokerapi.BindingRequest) (*brokerapi.CreateServiceBindingResponse, error) {
+	glog.Infof("Bind called. instanceID: %q", instanceID)
 	instance, ok := b.instanceMap[instanceID]
 	if ! ok {
+		glog.Errorf("Instance ID %q not found.")
 		return nil, fmt.Errorf("Instance ID %q not found.", instanceID)
 	}
-	creds := instance.Credential
-	if creds == nil {
+	if len(instance.Credential) == 0 {
+		glog.Errorf("Instance %q is missing credentials.", instanceID)
 		return nil, fmt.Errorf("No credentials found for instance %q.", instanceID)
 	}
+	glog.Infof("Bind instance %q succeeded.", instanceID)
 	return &brokerapi.CreateServiceBindingResponse{
-		Credentials: creds,
+		Credentials: instance.Credential,
 	}, nil
 }
 
@@ -218,22 +241,36 @@ func (b *broker) UnBind(instanceID, bindingID, serviceID, planID string) error {
 	return nil
 }
 
-func (b *broker) provisionBucket(bucket string) error {
-	glog.Infof("provisionBucket(name: %q).", bucket)
+func (b *broker) provisionBucket(bucketName string) error {
+	glog.Infof("Creating bucket %q", bucketName)
 	location := "" // ignored for now...
-	// check if bucket already exists
-	exists, err := b.s3Client.BucketExists(bucket)
-	if err == nil && exists {
-		return fmt.Errorf("Bucket %q already exists.  S3-Client: %v", bucket, err)
-	}
 	// create new bucket
-	glog.Infof("Creating bucket %q.", bucket)
-	err = b.s3Client.MakeBucket(bucket, location)
+	err := b.s3Client.MakeBucket(bucketName, location)
 	if err != nil {
+		glog.Errorf("Error creating bucket: %v", err)
 		return fmt.Errorf("S3-Client.MakeBucket err: %v", err)
 	}
-	glog.Infof("Bucket %q created.", bucket)
+	glog.Infof("Create bucket %q succeeded.", bucketName)
 	return nil
+}
+
+// TODO (copejon) long way of checking for bucket name collision.  gluster-swift does not support the api call that
+//   minio.BucketExists() maps to; always fails with "400 bad request".
+func (b *broker) checkBucketExists(bucketName string) (bool, error) {
+	glog.Infof("Checking if bucket name %q already exists.", bucketName)
+	buckets, err := b.s3Client.ListBuckets()
+	if err != nil {
+		glog.Errorf("Error occurred during ListBuckets: %v", err)
+		return false, fmt.Errorf("Error occurred during ListBuckets: %v", err)
+	}
+	exists := false
+	for _, bucket := range buckets {
+		if bucketName == bucket.Name {
+			exists = true
+			break
+		}
+	}
+	return exists, nil
 }
 
 // getS3Client returns a minio api client
