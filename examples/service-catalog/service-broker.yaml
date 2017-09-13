@@ -3,4 +3,4 @@ kind: ServiceBroker
 metadata:
   name: cns-bucket-broker
 spec:
-  url: http://35.202.108.118:30011
+  url: http://35.202.108.118:30164

@@ -27,8 +27,8 @@ import (
 	"syscall"
 
 	"github.com/golang/glog"
-	"github.com/cns-object-broker/pkg/broker/s3-broker"
-	"github.com/cns-object-broker/pkg/broker/server"
+	"github.com/cns-object-broker/pkg/broker"
+	"github.com/cns-object-broker/pkg/server"
 )
 
 var options struct {
@@ -62,7 +62,7 @@ func runWithContext(ctx context.Context) error {
 	}
 
 	addr := ":" + strconv.Itoa(options.Port)
-	return server.Run(ctx, addr, s3_broker.CreateBroker())
+	return server.Run(ctx, addr, broker.CreateBroker())
 }
 
 // cancelOnInterrupt calls f when os.Interrupt or SIGTERM is received.

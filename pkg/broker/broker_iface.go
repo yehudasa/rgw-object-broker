@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package s3_broker
+package broker
 
 import (
 	"github.com/kubernetes-incubator/service-catalog/pkg/brokerapi"

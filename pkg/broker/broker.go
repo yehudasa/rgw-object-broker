@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package s3_broker
+package broker
 
 import (
 	"fmt"
@@ -30,18 +30,25 @@ import (
 	k8sRest "k8s.io/client-go/rest"
 )
 
-type s3ServiceInstance struct {
+const (
+	BUCKET_ENDPOINT = "bucketEndpoint"
+	BUCKET_NAME     = "bucketName"
+	BUCKET_ID       = "bucketID"
+	BUCKET_PWORD    = "bucketPword"
+)
+
+type serviceInstance struct {
 	// k8s namespace
 	Namespace string
 	// binding credential created during Bind()
 	Credential brokerapi.Credential // s3 server url, includes port and bucket name
 }
 
-type s3Broker struct {
+type broker struct {
 	// rwMutex controls concurrent R and RW access
 	rwMutex sync.RWMutex
 	// instanceMap maps instanceIDs to the ID's userProvidedServiceInstance values
-	instanceMap map[string]*s3ServiceInstance
+	instanceMap map[string]*serviceInstance
 	// client used to access s3 API
 	s3Client *minio.Client
 	// s3 server ip and port
@@ -55,7 +62,7 @@ type s3Broker struct {
 // CreateBroker initializes the service broker. This function is called by server.Start()
 func CreateBroker() Broker {
 	const S3_BROKER_POD_LABEL = "glusterfs=s3-pod"
-	var instanceMap = make(map[string]*s3ServiceInstance)
+	var instanceMap = make(map[string]*serviceInstance)
 	glog.Info("Generating new broker.")
 	s3ip, err := getExternalIP()
 	if err != nil {
@@ -109,7 +116,7 @@ func CreateBroker() Broker {
 		glog.Fatalf("failed to get minio-s3 client: %v\n", err)
 	}
 	glog.Infof("New Broker for s3 endpoint: %s", s3endpoint)
-	return &s3Broker{
+	return &broker{
 		instanceMap: instanceMap,
 		s3Client:    s3c,
 		s3url:       s3endpoint,
@@ -119,7 +126,7 @@ func CreateBroker() Broker {
 	}
 }
 
-func (b *s3Broker) Catalog() (*brokerapi.Catalog, error) {
+func (b *broker) Catalog() (*brokerapi.Catalog, error) {
 	return &brokerapi.Catalog{
 		Services: []*brokerapi.Service{
 			{
@@ -140,37 +147,40 @@ func (b *s3Broker) Catalog() (*brokerapi.Catalog, error) {
 	}, nil
 }
 
-func (b *s3Broker) GetServiceInstanceLastOperation(instanceID, serviceID, planID, operation string) (*brokerapi.LastOperationResponse, error) {
+func (b *broker) GetServiceInstanceLastOperation(instanceID, serviceID, planID, operation string) (*brokerapi.LastOperationResponse, error) {
 	glog.Info("GetServiceInstanceLastOperation not yet implemented.")
 	return nil, nil
 }
 
-func (b *s3Broker) CreateServiceInstance(instanceID string, req *brokerapi.CreateServiceInstanceRequest) (*brokerapi.CreateServiceInstanceResponse, error) {
-	glog.Info("CreateServiceInstance called.  instanceID: %s", instanceID)
+func (b *broker) CreateServiceInstance(instanceID string, req *brokerapi.CreateServiceInstanceRequest) (*brokerapi.CreateServiceInstanceResponse, error) {
+	glog.Infof("CreateServiceInstance called.  instanceID: %s", instanceID)
 	b.rwMutex.Lock()
 	defer b.rwMutex.Unlock()
-	const (
-		BUCKET_ENDPOINT = "bucketEndpoint"
-		BUCKET_NAME     = "bucketName"
-		BUCKET_ID       = "bucketID"
-		BUCKET_PWORD    = "bucketPword"
-	)
 	// does service instance exist?
 	if _, ok := b.instanceMap[instanceID]; ok {
+		glog.Errorf("Instance requested already exists.")
 		return nil, fmt.Errorf("ServiceInstance %q already exists", instanceID)
 	}
 	// Check required parameter "bucketName"
 	bucketName, ok := req.Parameters["bucketName"].(string)
 	if ! ok {
+		glog.Errorf("Bucket name not provided in request parameters.")
 		return nil, fmt.Errorf("Paramters[\"bucketName\"] not provided.  Please define a bucket name.")
 	}
-	glog.Info("Creating new bucket: %q for instance %q.", bucketName, instanceID)
+	glog.Infof("Creating new bucket: %q for instance %q.", bucketName, instanceID)
 	// create new service instance
-	err := b.provisionBucket(bucketName)
+	exists, err := b.checkBucketExists(bucketName)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to provision bucket <%s>: %v", bucketName, err)
+		return nil, fmt.Errorf("Error occured while checking bucket name availability.")
 	}
-	b.instanceMap[instanceID] = &s3ServiceInstance{
+	if exists {
+		glog.Errorf("Bucket name unavailable: %q already exists.", bucketName)
+		return nil, fmt.Errorf("Bucket name unavailable: %q already exists.", bucketName)
+	}
+	if err := b.provisionBucket(bucketName); err != nil {
+		return nil, err
+	}
+	b.instanceMap[instanceID] = &serviceInstance{
 		Namespace: req.ContextProfile.Namespace,
 		Credential: brokerapi.Credential{
 			BUCKET_NAME:     bucketName,
@@ -182,48 +192,85 @@ func (b *s3Broker) CreateServiceInstance(instanceID string, req *brokerapi.Creat
 	return nil, nil
 }
 
-// TODO
-func (b *s3Broker) RemoveServiceInstance(instanceID, serviceID, planID string, acceptsIncomplete bool) (*brokerapi.DeleteServiceInstanceResponse, error) {
-	glog.Info("RemoveServiceInstance not yet implemented.")
+func (b *broker) RemoveServiceInstance(instanceID, serviceID, planID string, acceptsIncomplete bool) (*brokerapi.DeleteServiceInstanceResponse, error) {
+	glog.Infof("RemoveServiceInstance called. instanceID: %s", instanceID)
+	b.rwMutex.Lock()
+	defer b.rwMutex.Unlock()
+	instance, ok := b.instanceMap[instanceID]
+	if ! ok {
+		glog.Errorf("InstanceID %q not found.", instanceID)
+		return nil, fmt.Errorf("Broker cannot find instanceID %q.", instanceID)
+	}
+	bucketName := instance.Credential[BUCKET_NAME].(string)
+	exists, err := b.checkBucketExists(bucketName)
+	if err != nil {
+		return nil, fmt.Errorf("Error checking if bucket exists: %v", err)
+	}
+	if exists {
+		glog.Infof("Removing bucket %q", bucketName)
+		if err := b.s3Client.RemoveBucket(bucketName); err != nil {
+			glog.Errorf("Error during RemoveBucket: %v", err)
+			return nil, fmt.Errorf("S3 Client errored while removing bucket: %v", err)
+		}
+	}
+	delete(b.instanceMap, BUCKET_NAME)
+	glog.Infof("Remove bucket %q succeeded.", bucketName)
 	return nil, nil
 }
 
-func (b *s3Broker) Bind(instanceID, bindingID string, req *brokerapi.BindingRequest) (*brokerapi.CreateServiceBindingResponse, error) {
+func (b *broker) Bind(instanceID, bindingID string, req *brokerapi.BindingRequest) (*brokerapi.CreateServiceBindingResponse, error) {
+	glog.Infof("Bind called. instanceID: %q", instanceID)
 	instance, ok := b.instanceMap[instanceID]
 	if ! ok {
+		glog.Errorf("Instance ID %q not found.")
 		return nil, fmt.Errorf("Instance ID %q not found.", instanceID)
 	}
-	creds := instance.Credential
-	if creds == nil {
+	if len(instance.Credential) == 0 {
+		glog.Errorf("Instance %q is missing credentials.", instanceID)
 		return nil, fmt.Errorf("No credentials found for instance %q.", instanceID)
 	}
+	glog.Infof("Bind instance %q succeeded.", instanceID)
 	return &brokerapi.CreateServiceBindingResponse{
-		Credentials: creds,
+		Credentials: instance.Credential,
 	}, nil
 }
 
 // nothing to do here
-func (b *s3Broker) UnBind(instanceID, bindingID, serviceID, planID string) error {
+func (b *broker) UnBind(instanceID, bindingID, serviceID, planID string) error {
 	glog.Info("UnBind not yet implemented.")
 	return nil
 }
 
-func (b *s3Broker) provisionBucket(bucket string) error {
-	glog.Infof("provisionBucket(name: %q).", bucket)
+func (b *broker) provisionBucket(bucketName string) error {
+	glog.Infof("Creating bucket %q", bucketName)
 	location := "" // ignored for now...
-	// check if bucket already exists
-	exists, err := b.s3Client.BucketExists(bucket)
-	if err == nil && exists {
-		return fmt.Errorf("Bucket %q already exists.  S3-Client: %v", bucket, err)
-	}
 	// create new bucket
-	glog.Infof("Creating bucket %q.", bucket)
-	err = b.s3Client.MakeBucket(bucket, location)
+	err := b.s3Client.MakeBucket(bucketName, location)
 	if err != nil {
+		glog.Errorf("Error creating bucket: %v", err)
 		return fmt.Errorf("S3-Client.MakeBucket err: %v", err)
 	}
-	glog.Infof("Bucket %q created.", bucket)
+	glog.Infof("Create bucket %q succeeded.", bucketName)
 	return nil
+}
+
+// TODO (copejon) long way of checking for bucket name collision.  gluster-swift does not support the api call that
+//   minio.BucketExists() maps to; always fails with "400 bad request".
+func (b *broker) checkBucketExists(bucketName string) (bool, error) {
+	glog.Infof("Checking if bucket name %q already exists.", bucketName)
+	buckets, err := b.s3Client.ListBuckets()
+	if err != nil {
+		glog.Errorf("Error occurred during ListBuckets: %v", err)
+		return false, fmt.Errorf("Error occurred during ListBuckets: %v", err)
+	}
+	exists := false
+	for _, bucket := range buckets {
+		if bucketName == bucket.Name {
+			exists = true
+			break
+		}
+	}
+	return exists, nil
 }
 
 // getS3Client returns a minio api client
