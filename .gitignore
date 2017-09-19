@@ -1,4 +1,7 @@
 .idea/
 bin/*
 *.swp
+*.DS_Store
+._.DS_Store
+docs/.*
 build/tmp
