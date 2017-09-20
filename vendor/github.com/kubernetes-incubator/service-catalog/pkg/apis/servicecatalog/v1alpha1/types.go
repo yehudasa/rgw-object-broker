@@ -60,7 +60,32 @@ type ServiceBrokerSpec struct {
 	// CABundle is a PEM encoded CA bundle which will be used to validate a Broker's serving certificate.
 	// +optional
 	CABundle []byte `json:"caBundle,omitempty"`
+
+	// RelistBehavior specifies the type of relist behavior the catalog should
+	// exhibit when relisting ServiceClasses available from a broker.
+	RelistBehavior ServiceBrokerRelistBehavior `json:"relistBehavior"`
+
+	// RelistDuration is the frequency by which a controller will relist the
+	// broker when the RelistBehavior is set to ServiceBrokerRelistBehaviorDuration.
+	RelistDuration *metav1.Duration `json:"relistDuration"`
+
+	// RelistRequests is a strictly increasing, non-negative integer counter that
+	// can be manually incremented by a user to manually trigger a relist.
+	RelistRequests int64 `json:"relistRequests"`
 }
+
+// ServiceBrokerRelistBehavior represents a type of broker relist behavior.
+type ServiceBrokerRelistBehavior string
+
+const (
+	// ServiceBrokerRelistBehaviorDuration indicates that the broker will be
+	// relisted automatically after the specified duration has passed.
+	ServiceBrokerRelistBehaviorDuration ServiceBrokerRelistBehavior = "Duration"
+
+	// ServiceBrokerRelistBehaviorManual indicates that the broker is only
+	// relisted when the spec of the broker changes.
+	ServiceBrokerRelistBehaviorManual ServiceBrokerRelistBehavior = "Manual"
+)
 
 // ServiceBrokerAuthInfo is a union type that contains information on one of the authentication methods
 // the the service catalog and brokers may support, according to the OpenServiceBroker API
@@ -118,6 +143,9 @@ type ServiceBrokerStatus struct {
 	// was last processed by the controller. The reconciled generation is updated
 	// even if the controller failed to process the spec.
 	ReconciledGeneration int64 `json:"reconciledGeneration"`
+
+	// OperationStartTime is the time at which the current operation began.
+	OperationStartTime *metav1.Time `json:"operationStartTime,omitempty"`
 }
 
 // ServiceBrokerCondition contains condition information for a Broker.
@@ -148,6 +176,10 @@ const (
 	// ServiceBrokerConditionReady represents the fact that a given broker condition
 	// is in ready state.
 	ServiceBrokerConditionReady ServiceBrokerConditionType = "Ready"
+
+	// ServiceBrokerConditionFailed represents information about a final failure
+	// that should not be retried.
+	ServiceBrokerConditionFailed ServiceBrokerConditionType = "Failed"
 )
 
 // ConditionStatus represents a condition's status.
@@ -293,6 +325,18 @@ type ServiceInstanceList struct {
 	Items []ServiceInstance `json:"items"`
 }
 
+// UserInfo holds information about the user that last changed a resource's spec.
+type UserInfo struct {
+	Username string                `json:"username"`
+	UID      string                `json:"uid"`
+	Groups   []string              `json:"groups,omitempty"`
+	Extra    map[string]ExtraValue `json:"extra,omitempty"`
+}
+
+// ExtraValue contains additional information about a user that may be
+// provided by the authenticator.
+type ExtraValue []string
+
 // +genclient=true
 
 // ServiceInstance represents a provisioned instance of a ServiceClass.
@@ -347,6 +391,15 @@ type ServiceInstanceSpec struct {
 	//
 	// Immutable.
 	ExternalID string `json:"externalID"`
+
+	// Currently, this field is ALPHA: it may change or disappear at any time
+	// and its data will not be migrated.
+	//
+	// UserInfo contains information about the user that last modified this
+	// instance. This field is set by the API server and not settable by the
+	// end-user. User-provided values for this field are not saved.
+	// +optional
+	UserInfo *UserInfo `json:"userInfo"`
 }
 
 // ServiceInstanceStatus represents the current status of an Instance.
@@ -372,6 +425,9 @@ type ServiceInstanceStatus struct {
 	// was last processed by the controller. The reconciled generation is updated
 	// even if the controller failed to process the spec.
 	ReconciledGeneration int64 `json:"reconciledGeneration"`
+
+	// OperationStartTime is the time at which the current operation began.
+	OperationStartTime *metav1.Time `json:"operationStartTime,omitempty"`
 }
 
 // ServiceInstanceCondition contains condition information about an Instance.
@@ -464,6 +520,15 @@ type ServiceInstanceCredentialSpec struct {
 	//
 	// Immutable.
 	ExternalID string `json:"externalID"`
+
+	// Currently, this field is ALPHA: it may change or disappear at any time
+	// and its data will not be migrated.
+	//
+	// UserInfo contains information about the user that last modified this
+	// ServiceInstanceCredential. This field is set by the API server and not
+	// settable by the end-user. User-provided values for this field are not saved.
+	// +optional
+	UserInfo *UserInfo `json:"userInfo"`
 }
 
 // ServiceInstanceCredentialStatus represents the current status of a ServiceInstanceCredential.
@@ -475,6 +540,9 @@ type ServiceInstanceCredentialStatus struct {
 	// The reconciled generation is updated even if the controller failed to
 	// process the spec.
 	ReconciledGeneration int64 `json:"reconciledGeneration"`
+
+	// OperationStartTime is the time at which the current operation began.
+	OperationStartTime *metav1.Time `json:"operationStartTime,omitempty"`
 }
 
 // ServiceInstanceCredentialCondition condition information for a ServiceInstanceCredential.

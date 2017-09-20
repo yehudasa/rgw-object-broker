@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"sync"
 	"github.com/golang/glog"
+	"github.com/rs/xid"
 
 	"github.com/kubernetes-incubator/service-catalog/pkg/brokerapi"
 	"github.com/minio/minio-go"
@@ -164,8 +165,8 @@ func (b *broker) CreateServiceInstance(instanceID string, req *brokerapi.CreateS
 	// Check required parameter "bucketName"
 	bucketName, ok := req.Parameters["bucketName"].(string)
 	if ! ok {
-		glog.Errorf("Bucket name not provided in request parameters.")
-		return nil, fmt.Errorf("Paramters[\"bucketName\"] not provided.  Please define a bucket name.")
+		glog.Errorf("Bucket name not provided, generating random name.")
+		bucketName = xid.New().String()
 	}
 	glog.Infof("Creating new bucket: %q for instance %q.", bucketName, instanceID)
 	// create new service instance

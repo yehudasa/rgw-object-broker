@@ -24,8 +24,10 @@ import (
 	"github.com/golang/glog"
 	"github.com/kubernetes-incubator/service-catalog/pkg"
 	"github.com/kubernetes-incubator/service-catalog/pkg/registry/servicecatalog/server"
+	"github.com/kubernetes-incubator/service-catalog/plugin/pkg/admission/broker/authsarcheck"
 	"github.com/kubernetes-incubator/service-catalog/plugin/pkg/admission/namespace/lifecycle"
 	siclifecycle "github.com/kubernetes-incubator/service-catalog/plugin/pkg/admission/serviceinstancecredentials/lifecycle"
+	"github.com/kubernetes-incubator/service-catalog/plugin/pkg/admission/serviceplan/changevalidator"
 	"github.com/kubernetes-incubator/service-catalog/plugin/pkg/admission/serviceplan/defaultserviceplan"
 	"github.com/spf13/cobra"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -139,4 +141,6 @@ func registerAllAdmissionPlugins(plugins *admission.Plugins) {
 	lifecycle.Register(plugins)
 	defaultserviceplan.Register(plugins)
 	siclifecycle.Register(plugins)
+	changevalidator.Register(plugins)
+	authsarcheck.Register(plugins)
 }
