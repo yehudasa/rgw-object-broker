@@ -1,5 +1,5 @@
-hash: 1b3981adc58fd30b248cdd50790940be152712dc5325d4f081d4368086cb42e8
-updated: 2017-09-08T13:40:54.667919092-05:00
+hash: 5794e1c2650c595c3da57895ed2cba930abde5382ed4654987b8fae23e0933c6
+updated: 2017-09-20T17:04:08.922042843-05:00
 imports:
 - name: github.com/davecgh/go-spew
   version: 5215b55f46b2b919f50a1df0eaa5886afe4e3b3d
@@ -42,14 +42,17 @@ imports:
   version: 44145f04b68cf362d9c4df2182967c2275eaefed
 - name: github.com/google/gofuzz
   version: 44d81051d367757e1c7c6a5a86423ece9afcf63c
+- name: github.com/gorilla/context
+  version: 215affda49addc4c8ef7e2534915df2c8c35c6cd
 - name: github.com/gorilla/mux
-  version: bcd8bc72b08df0f70df986b97f95590779502d31
+  version: 24fca303ac6da784b9e8269f724ddeb0b2eea5e7
 - name: github.com/juju/ratelimit
   version: 5b9ff866471762aa2ab2dced63c9fb6f53921342
 - name: github.com/kubernetes-incubator/service-catalog
-  version: 8b69791409d7c70dfe6fd0520da2f96c78303add
+  version: 092d7f83535768c24b0747c9c68ca4339599bb90
   subpackages:
   - pkg/brokerapi
+  - pkg/util
 - name: github.com/mailru/easyjson
   version: d5b7844b561a7bc640052f1b935f7b800330d7e0
   subpackages:
@@ -59,7 +62,7 @@ imports:
 - name: github.com/minio/go-homedir
   version: 21304a94172ae3a09dee2cd86a12fb6f842138c7
 - name: github.com/minio/minio-go
-  version: 84539d76271caeffb7a1d5f058bd83c6449f8145
+  version: 4e0f567303d4cc90ceb055a451959fb9fc391fb9
   subpackages:
   - pkg/credentials
   - pkg/encrypt
@@ -71,6 +74,8 @@ imports:
   version: 8a290539e2e8629dbc4e6bad948158f790ec31f4
 - name: github.com/PuerkitoBio/urlesc
   version: 5bd2802263f21d8788851d5305584c82a5c75d7e
+- name: github.com/rs/xid
+  version: 02dd45c33376f85d1064355dc790dcc4850596b1
 - name: github.com/spf13/pflag
   version: 9ff6c6923cfffbcd502984b8e0c80539a94968b7
 - name: github.com/ugorji/go

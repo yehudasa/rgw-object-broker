@@ -1,4 +1,4 @@
-package: github.com/dynamic-gluster-obj-broker
+package: github.com/cns-object-broker
 import:
 - package: github.com/golang/glog
 - package: github.com/gorilla/mux

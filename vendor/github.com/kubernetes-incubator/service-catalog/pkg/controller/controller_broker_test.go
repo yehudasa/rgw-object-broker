@@ -54,39 +54,41 @@ func TestShouldReconcileServiceBroker(t *testing.T) {
 	// name: short description of the test
 	// broker: broker object to test
 	// now: what time the interval is calculated with respect to interval
-	// internal: the time that has elapsed since now
 	// reconcile: whether or not the reconciler should run, the return of
 	// shouldReconcileServiceBroker
 	cases := []struct {
 		name      string
 		broker    *v1alpha1.ServiceBroker
 		now       time.Time
-		interval  time.Duration
 		reconcile bool
+		err       error
 	}{
 		{
-			name:      "no status",
-			broker:    getTestServiceBroker(),
+			name: "no status",
+			broker: func() *v1alpha1.ServiceBroker {
+				broker := getTestServiceBroker()
+				broker.Spec.RelistDuration = &metav1.Duration{Duration: 3 * time.Minute}
+				return broker
+			}(),
 			now:       time.Now(),
-			interval:  3 * time.Minute,
 			reconcile: true,
 		},
 		{
 			name: "deletionTimestamp set",
 			broker: func() *v1alpha1.ServiceBroker {
-				b := getTestServiceBrokerWithStatus(v1alpha1.ConditionTrue)
-				b.DeletionTimestamp = &metav1.Time{}
-				return b
+				broker := getTestServiceBrokerWithStatus(v1alpha1.ConditionTrue)
+				broker.DeletionTimestamp = &metav1.Time{}
+				broker.Spec.RelistDuration = &metav1.Duration{Duration: 3 * time.Hour}
+				return broker
 			}(),
 			now:       time.Now(),
-			interval:  3 * time.Hour,
 			reconcile: true,
 		},
 		{
 			name: "no ready condition",
 			broker: func() *v1alpha1.ServiceBroker {
-				b := getTestServiceBroker()
-				b.Status = v1alpha1.ServiceBrokerStatus{
+				broker := getTestServiceBroker()
+				broker.Status = v1alpha1.ServiceBrokerStatus{
 					Conditions: []v1alpha1.ServiceBrokerCondition{
 						{
 							Type:   v1alpha1.ServiceBrokerConditionType("NotARealCondition"),
@@ -94,37 +96,40 @@ func TestShouldReconcileServiceBroker(t *testing.T) {
 						},
 					},
 				}
-				return b
+				broker.Spec.RelistDuration = &metav1.Duration{Duration: 3 * time.Minute}
+				return broker
 			}(),
 			now:       time.Now(),
-			interval:  3 * time.Minute,
 			reconcile: true,
 		},
 		{
-			name:      "not ready",
-			broker:    getTestServiceBrokerWithStatus(v1alpha1.ConditionFalse),
+			name: "not ready",
+			broker: func() *v1alpha1.ServiceBroker {
+				broker := getTestServiceBrokerWithStatus(v1alpha1.ConditionFalse)
+				broker.Spec.RelistDuration = &metav1.Duration{Duration: 3 * time.Minute}
+				return broker
+			}(),
 			now:       time.Now(),
-			interval:  3 * time.Minute,
 			reconcile: true,
 		},
 		{
 			name: "ready, interval elapsed",
 			broker: func() *v1alpha1.ServiceBroker {
 				broker := getTestServiceBrokerWithStatus(v1alpha1.ConditionTrue)
+				broker.Spec.RelistDuration = &metav1.Duration{Duration: 3 * time.Minute}
 				return broker
 			}(),
 			now:       time.Now(),
-			interval:  3 * time.Minute,
 			reconcile: true,
 		},
 		{
 			name: "ready, interval not elapsed",
 			broker: func() *v1alpha1.ServiceBroker {
 				broker := getTestServiceBrokerWithStatus(v1alpha1.ConditionTrue)
+				broker.Spec.RelistDuration = &metav1.Duration{Duration: 3 * time.Hour}
 				return broker
 			}(),
 			now:       time.Now(),
-			interval:  3 * time.Hour,
 			reconcile: false,
 		},
 		{
@@ -133,11 +138,32 @@ func TestShouldReconcileServiceBroker(t *testing.T) {
 				broker := getTestServiceBrokerWithStatus(v1alpha1.ConditionTrue)
 				broker.Generation = 2
 				broker.Status.ReconciledGeneration = 1
+				broker.Spec.RelistDuration = &metav1.Duration{Duration: 3 * time.Hour}
 				return broker
 			}(),
 			now:       time.Now(),
-			interval:  3 * time.Hour,
 			reconcile: true,
+		},
+		{
+			name: "ready, duration behavior, nil duration",
+			broker: func() *v1alpha1.ServiceBroker {
+				broker := getTestServiceBrokerWithStatus(v1alpha1.ConditionTrue)
+				broker.Spec.RelistBehavior = v1alpha1.ServiceBrokerRelistBehaviorDuration
+				broker.Spec.RelistDuration = nil
+				return broker
+			}(),
+			now:       time.Now(),
+			reconcile: false,
+		},
+		{
+			name: "ready, manual behavior",
+			broker: func() *v1alpha1.ServiceBroker {
+				broker := getTestServiceBrokerWithStatus(v1alpha1.ConditionTrue)
+				broker.Spec.RelistBehavior = v1alpha1.ServiceBrokerRelistBehaviorManual
+				return broker
+			}(),
+			now:       time.Now(),
+			reconcile: false,
 		},
 	}
 
@@ -147,8 +173,14 @@ func TestShouldReconcileServiceBroker(t *testing.T) {
 			ltt = &tc.broker.Status.Conditions[0].LastTransitionTime.Time
 		}
 
-		t.Logf("%v: now: %v, interval: %v, last transition time: %v", tc.name, tc.now, tc.interval, ltt)
-		actual := shouldReconcileServiceBroker(tc.broker, tc.now, tc.interval)
+		if tc.broker.Spec.RelistDuration != nil {
+			interval := tc.broker.Spec.RelistDuration.Duration
+			t.Logf("%v: now: %v, interval: %v, last transition time: %v", tc.name, tc.now, interval, ltt)
+		} else {
+			t.Logf("broker.Spec.RelistDuration set to nil")
+		}
+
+		actual := shouldReconcileServiceBroker(tc.broker, tc.now)
 
 		if e, a := tc.reconcile, actual; e != a {
 			t.Errorf("%v: unexpected result: expected %v, got %v", tc.name, e, a)
@@ -339,10 +371,13 @@ func TestReconcileServiceBrokerErrorFetchingCatalog(t *testing.T) {
 	assertGetCatalog(t, brokerActions[0])
 
 	actions := fakeCatalogClient.Actions()
-	assertNumberOfActions(t, actions, 1)
+	assertNumberOfActions(t, actions, 2)
 
 	updatedServiceBroker := assertUpdateStatus(t, actions[0], broker)
 	assertServiceBrokerReadyFalse(t, updatedServiceBroker)
+
+	updatedServiceBroker = assertUpdateStatus(t, actions[1], broker)
+	assertServiceBrokerOperationStartTimeSet(t, updatedServiceBroker, true)
 
 	assertNumberOfActions(t, fakeKubeClient.Actions(), 0)
 
@@ -596,6 +631,93 @@ func TestReconcileServiceBrokerWithReconcileError(t *testing.T) {
 	expectedEvent := api.EventTypeWarning + " " + errorSyncingCatalogReason + ` Error reconciling serviceClass "test-serviceclass" (broker "test-broker"): error creating serviceclass`
 	if e, a := expectedEvent, events[0]; e != a {
 		t.Fatalf("Received unexpected event: %v", a)
+	}
+}
+
+// TestReconcileServiceBrokerSuccessOnFinalRetry verifies that reconciliation can
+// succeed on the last attempt before timing out of the retry loop
+func TestReconcileServiceBrokerSuccessOnFinalRetry(t *testing.T) {
+	fakeKubeClient, fakeCatalogClient, fakeServiceBrokerClient, testController, sharedInformers := newTestController(t, getTestCatalogConfig())
+
+	testServiceClass := getTestServiceClass()
+	sharedInformers.ServiceClasses().Informer().GetStore().Add(testServiceClass)
+
+	broker := getTestServiceBroker()
+	startTime := metav1.NewTime(time.Now().Add(-7 * 24 * time.Hour))
+	broker.Status.OperationStartTime = &startTime
+
+	if err := testController.reconcileServiceBroker(broker); err != nil {
+		t.Fatalf("This should not fail : %v", err)
+	}
+
+	brokerActions := fakeServiceBrokerClient.Actions()
+	assertNumberOfServiceBrokerActions(t, brokerActions, 1)
+	assertGetCatalog(t, brokerActions[0])
+
+	actions := fakeCatalogClient.Actions()
+	assertNumberOfActions(t, actions, 3)
+
+	// first action should be an update action to clear OperationStartTime
+	updatedServiceBroker := assertUpdateStatus(t, actions[0], getTestServiceBroker())
+	assertServiceBrokerOperationStartTimeSet(t, updatedServiceBroker, false)
+
+	// first action should be an update action for a service class
+	assertUpdate(t, actions[1], testServiceClass)
+
+	// second action should be an update action for broker status subresource
+	updatedServiceBroker = assertUpdateStatus(t, actions[2], getTestServiceBroker())
+	assertServiceBrokerReadyTrue(t, updatedServiceBroker)
+
+	// verify no kube resources created
+	kubeActions := fakeKubeClient.Actions()
+	assertNumberOfActions(t, kubeActions, 0)
+}
+
+// TestReconcileServiceBrokerFailureOnFinalRetry verifies that reconciliation
+// completes in the event of an error after the retry duration elapses.
+func TestReconcileServiceBrokerFailureOnFinalRetry(t *testing.T) {
+	fakeKubeClient, fakeCatalogClient, fakeServiceBrokerClient, testController, _ := newTestController(t, fakeosb.FakeClientConfiguration{
+		CatalogReaction: &fakeosb.CatalogReaction{
+			Error: errors.New("ooops"),
+		},
+	})
+
+	broker := getTestServiceBroker()
+	startTime := metav1.NewTime(time.Now().Add(-7 * 24 * time.Hour))
+	broker.Status.OperationStartTime = &startTime
+
+	if err := testController.reconcileServiceBroker(broker); err != nil {
+		t.Fatalf("Should have return no error because the retry duration has elapsed: %v", err)
+	}
+
+	brokerActions := fakeServiceBrokerClient.Actions()
+	assertNumberOfServiceBrokerActions(t, brokerActions, 1)
+	assertGetCatalog(t, brokerActions[0])
+
+	actions := fakeCatalogClient.Actions()
+	assertNumberOfActions(t, actions, 2)
+
+	updatedServiceBroker := assertUpdateStatus(t, actions[0], broker)
+	assertServiceBrokerReadyFalse(t, updatedServiceBroker)
+
+	updatedServiceBroker = assertUpdateStatus(t, actions[1], broker)
+	assertServiceBrokerCondition(t, updatedServiceBroker, v1alpha1.ServiceBrokerConditionFailed, v1alpha1.ConditionTrue)
+	assertServiceBrokerOperationStartTimeSet(t, updatedServiceBroker, false)
+
+	assertNumberOfActions(t, fakeKubeClient.Actions(), 0)
+
+	expectedEventPrefixes := []string{
+		api.EventTypeWarning + " " + errorFetchingCatalogReason,
+		api.EventTypeWarning + " " + errorReconciliationRetryTimeoutReason,
+	}
+	events := getRecordedEvents(testController)
+	assertNumEvents(t, events, len(expectedEventPrefixes))
+
+	for i, e := range expectedEventPrefixes {
+		a := events[i]
+		if !strings.HasPrefix(a, e) {
+			t.Fatalf("Received unexpected event:\n  expected prefix: %v\n  got: %v", e, a)
+		}
 	}
 }
 

@@ -296,12 +296,32 @@ func GetOpenAPIDefinitions(ref openapi.ReferenceCallback) map[string]openapi.Ope
 								Format:      "byte",
 							},
 						},
+						"relistBehavior": {
+							SchemaProps: spec.SchemaProps{
+								Description: "RelistBehavior specifies the type of relist behavior the catalog should exhibit when relisting ServiceClasses available from a broker.",
+								Type:        []string{"string"},
+								Format:      "",
+							},
+						},
+						"relistDuration": {
+							SchemaProps: spec.SchemaProps{
+								Description: "RelistDuration is the frequency by which a controller will relist the broker when the RelistBehavior is set to ServiceBrokerRelistBehaviorDuration.",
+								Ref:         ref("k8s.io/apimachinery/pkg/apis/meta/v1.Duration"),
+							},
+						},
+						"relistRequests": {
+							SchemaProps: spec.SchemaProps{
+								Description: "RelistRequests is a strictly increasing, non-negative integer counter that can be manually incremented by a user to manually trigger a relist.",
+								Type:        []string{"integer"},
+								Format:      "int64",
+							},
+						},
 					},
-					Required: []string{"url"},
+					Required: []string{"url", "relistBehavior", "relistDuration", "relistRequests"},
 				},
 			},
 			Dependencies: []string{
-				"github.com/kubernetes-incubator/service-catalog/pkg/apis/servicecatalog/v1alpha1.ServiceBrokerAuthInfo"},
+				"github.com/kubernetes-incubator/service-catalog/pkg/apis/servicecatalog/v1alpha1.ServiceBrokerAuthInfo", "k8s.io/apimachinery/pkg/apis/meta/v1.Duration"},
 		},
 		"github.com/kubernetes-incubator/service-catalog/pkg/apis/servicecatalog/v1alpha1.ServiceBrokerStatus": {
 			Schema: spec.Schema{
@@ -327,12 +347,18 @@ func GetOpenAPIDefinitions(ref openapi.ReferenceCallback) map[string]openapi.Ope
 								Format:      "int64",
 							},
 						},
+						"operationStartTime": {
+							SchemaProps: spec.SchemaProps{
+								Description: "OperationStartTime is the time at which the current operation began.",
+								Ref:         ref("k8s.io/apimachinery/pkg/apis/meta/v1.Time"),
+							},
+						},
 					},
 					Required: []string{"conditions", "reconciledGeneration"},
 				},
 			},
 			Dependencies: []string{
-				"github.com/kubernetes-incubator/service-catalog/pkg/apis/servicecatalog/v1alpha1.ServiceBrokerCondition"},
+				"github.com/kubernetes-incubator/service-catalog/pkg/apis/servicecatalog/v1alpha1.ServiceBrokerCondition", "k8s.io/apimachinery/pkg/apis/meta/v1.Time"},
 		},
 		"github.com/kubernetes-incubator/service-catalog/pkg/apis/servicecatalog/v1alpha1.ServiceClass": {
 			Schema: spec.Schema{
@@ -751,12 +777,18 @@ func GetOpenAPIDefinitions(ref openapi.ReferenceCallback) map[string]openapi.Ope
 								Format:      "",
 							},
 						},
+						"userInfo": {
+							SchemaProps: spec.SchemaProps{
+								Description: "Currently, this field is ALPHA: it may change or disappear at any time and its data will not be migrated.\n\nUserInfo contains information about the user that last modified this ServiceInstanceCredential. This field is set by the API server and not settable by the end-user. User-provided values for this field are not saved.",
+								Ref:         ref("github.com/kubernetes-incubator/service-catalog/pkg/apis/servicecatalog/v1alpha1.UserInfo"),
+							},
+						},
 					},
 					Required: []string{"instanceRef", "externalID"},
 				},
 			},
 			Dependencies: []string{
-				"github.com/kubernetes-incubator/service-catalog/pkg/apis/servicecatalog/v1alpha1.ParametersFromSource", "k8s.io/apimachinery/pkg/runtime.RawExtension", "k8s.io/client-go/pkg/api/v1.LocalObjectReference"},
+				"github.com/kubernetes-incubator/service-catalog/pkg/apis/servicecatalog/v1alpha1.ParametersFromSource", "github.com/kubernetes-incubator/service-catalog/pkg/apis/servicecatalog/v1alpha1.UserInfo", "k8s.io/apimachinery/pkg/runtime.RawExtension", "k8s.io/client-go/pkg/api/v1.LocalObjectReference"},
 		},
 		"github.com/kubernetes-incubator/service-catalog/pkg/apis/servicecatalog/v1alpha1.ServiceInstanceCredentialStatus": {
 			Schema: spec.Schema{
@@ -782,12 +814,18 @@ func GetOpenAPIDefinitions(ref openapi.ReferenceCallback) map[string]openapi.Ope
 								Format:      "int64",
 							},
 						},
+						"operationStartTime": {
+							SchemaProps: spec.SchemaProps{
+								Description: "OperationStartTime is the time at which the current operation began.",
+								Ref:         ref("k8s.io/apimachinery/pkg/apis/meta/v1.Time"),
+							},
+						},
 					},
 					Required: []string{"conditions", "reconciledGeneration"},
 				},
 			},
 			Dependencies: []string{
-				"github.com/kubernetes-incubator/service-catalog/pkg/apis/servicecatalog/v1alpha1.ServiceInstanceCredentialCondition"},
+				"github.com/kubernetes-incubator/service-catalog/pkg/apis/servicecatalog/v1alpha1.ServiceInstanceCredentialCondition", "k8s.io/apimachinery/pkg/apis/meta/v1.Time"},
 		},
 		"github.com/kubernetes-incubator/service-catalog/pkg/apis/servicecatalog/v1alpha1.ServiceInstanceList": {
 			Schema: spec.Schema{
@@ -877,12 +915,18 @@ func GetOpenAPIDefinitions(ref openapi.ReferenceCallback) map[string]openapi.Ope
 								Format:      "",
 							},
 						},
+						"userInfo": {
+							SchemaProps: spec.SchemaProps{
+								Description: "Currently, this field is ALPHA: it may change or disappear at any time and its data will not be migrated.\n\nUserInfo contains information about the user that last modified this instance. This field is set by the API server and not settable by the end-user. User-provided values for this field are not saved.",
+								Ref:         ref("github.com/kubernetes-incubator/service-catalog/pkg/apis/servicecatalog/v1alpha1.UserInfo"),
+							},
+						},
 					},
 					Required: []string{"serviceClassName", "externalID"},
 				},
 			},
 			Dependencies: []string{
-				"github.com/kubernetes-incubator/service-catalog/pkg/apis/servicecatalog/v1alpha1.ParametersFromSource", "k8s.io/apimachinery/pkg/runtime.RawExtension"},
+				"github.com/kubernetes-incubator/service-catalog/pkg/apis/servicecatalog/v1alpha1.ParametersFromSource", "github.com/kubernetes-incubator/service-catalog/pkg/apis/servicecatalog/v1alpha1.UserInfo", "k8s.io/apimachinery/pkg/runtime.RawExtension"},
 		},
 		"github.com/kubernetes-incubator/service-catalog/pkg/apis/servicecatalog/v1alpha1.ServiceInstanceStatus": {
 			Schema: spec.Schema{
@@ -930,12 +974,18 @@ func GetOpenAPIDefinitions(ref openapi.ReferenceCallback) map[string]openapi.Ope
 								Format:      "int64",
 							},
 						},
+						"operationStartTime": {
+							SchemaProps: spec.SchemaProps{
+								Description: "OperationStartTime is the time at which the current operation began.",
+								Ref:         ref("k8s.io/apimachinery/pkg/apis/meta/v1.Time"),
+							},
+						},
 					},
 					Required: []string{"conditions", "asyncOpInProgress", "reconciledGeneration"},
 				},
 			},
 			Dependencies: []string{
-				"github.com/kubernetes-incubator/service-catalog/pkg/apis/servicecatalog/v1alpha1.ServiceInstanceCondition"},
+				"github.com/kubernetes-incubator/service-catalog/pkg/apis/servicecatalog/v1alpha1.ServiceInstanceCondition", "k8s.io/apimachinery/pkg/apis/meta/v1.Time"},
 		},
 		"github.com/kubernetes-incubator/service-catalog/pkg/apis/servicecatalog/v1alpha1.ServicePlan": {
 			Schema: spec.Schema{
@@ -1007,6 +1057,62 @@ func GetOpenAPIDefinitions(ref openapi.ReferenceCallback) map[string]openapi.Ope
 			},
 			Dependencies: []string{
 				"k8s.io/apimachinery/pkg/runtime.RawExtension"},
+		},
+		"github.com/kubernetes-incubator/service-catalog/pkg/apis/servicecatalog/v1alpha1.UserInfo": {
+			Schema: spec.Schema{
+				SchemaProps: spec.SchemaProps{
+					Description: "UserInfo holds information about the user that last changed a resource's spec.",
+					Properties: map[string]spec.Schema{
+						"username": {
+							SchemaProps: spec.SchemaProps{
+								Type:   []string{"string"},
+								Format: "",
+							},
+						},
+						"uid": {
+							SchemaProps: spec.SchemaProps{
+								Type:   []string{"string"},
+								Format: "",
+							},
+						},
+						"groups": {
+							SchemaProps: spec.SchemaProps{
+								Type: []string{"array"},
+								Items: &spec.SchemaOrArray{
+									Schema: &spec.Schema{
+										SchemaProps: spec.SchemaProps{
+											Type:   []string{"string"},
+											Format: "",
+										},
+									},
+								},
+							},
+						},
+						"extra": {
+							SchemaProps: spec.SchemaProps{
+								Type: []string{"object"},
+								AdditionalProperties: &spec.SchemaOrBool{
+									Schema: &spec.Schema{
+										SchemaProps: spec.SchemaProps{
+											Type: []string{"array"},
+											Items: &spec.SchemaOrArray{
+												Schema: &spec.Schema{
+													SchemaProps: spec.SchemaProps{
+														Type:   []string{"string"},
+														Format: "",
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					Required: []string{"username", "uid"},
+				},
+			},
+			Dependencies: []string{},
 		},
 		"k8s.io/apimachinery/pkg/apis/meta/v1.APIGroup": {
 			Schema: spec.Schema{

@@ -19,6 +19,7 @@ package controller
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"reflect"
 	"strings"
@@ -33,7 +34,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/diff"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 
+	scfeatures "github.com/kubernetes-incubator/service-catalog/pkg/features"
 	"k8s.io/client-go/pkg/api"
 	"k8s.io/client-go/pkg/api/v1"
 	clientgotesting "k8s.io/client-go/testing"
@@ -1266,6 +1269,7 @@ func TestPollServiceInstanceFailureProvisioningWithOperation(t *testing.T) {
 	// ServiceInstance should be not ready and there no longer is an async operation
 	// in place.
 	assertServiceInstanceReadyFalse(t, updatedServiceInstance)
+	assertServiceInstanceCondition(t, updatedServiceInstance, v1alpha1.ServiceInstanceConditionFailed, v1alpha1.ConditionTrue)
 	assertAsyncOpInProgressFalse(t, updatedServiceInstance)
 }
 
@@ -1315,7 +1319,7 @@ func TestPollServiceInstanceInProgressDeprovisioningWithOperationNoFinalizer(t *
 	assertNumberOfActions(t, actions, 1)
 	action := actions[0]
 	updatedServiceInstance := assertUpdateStatus(t, action, instance)
-	assertServiceInstanceReadyFalse(t, updatedServiceInstance, asyncDeprovisioningMessage)
+	assertServiceInstanceReadyFalse(t, updatedServiceInstance, asyncDeprovisioningReason)
 
 	// verify no kube resources created.
 	// No actions
@@ -1434,6 +1438,7 @@ func TestPollServiceInstanceFailureDeprovisioningWithOperation(t *testing.T) {
 	// ServiceInstance should be set to unknown since the operation on the broker
 	// failed.
 	assertServiceInstanceReadyCondition(t, updatedServiceInstance, v1alpha1.ConditionUnknown, errorDeprovisionCalledReason)
+	assertServiceInstanceCondition(t, updatedServiceInstance, v1alpha1.ServiceInstanceConditionFailed, v1alpha1.ConditionTrue)
 	assertAsyncOpInProgressFalse(t, updatedServiceInstance)
 
 	events := getRecordedEvents(testController)
@@ -1630,6 +1635,245 @@ func TestPollServiceInstanceSuccessDeprovisioningWithOperationWithFinalizer(t *t
 	if e, a := expectedEvent, events[0]; e != a {
 		t.Fatalf("Received unexpected event: %v", a)
 	}
+}
+
+// TestReconcileServiceInstanceSuccessOnFinalRetry verifies that reconciliation
+// can succeed on the last attempt before timing out of the retry loop
+func TestReconcileServiceInstanceSuccessOnFinalRetry(t *testing.T) {
+	fakeKubeClient, fakeCatalogClient, fakeServiceBrokerClient, testController, sharedInformers := newTestController(t, fakeosb.FakeClientConfiguration{
+		ProvisionReaction: &fakeosb.ProvisionReaction{
+			Response: &osb.ProvisionResponse{},
+		},
+	})
+
+	sharedInformers.ServiceBrokers().Informer().GetStore().Add(getTestServiceBroker())
+	sharedInformers.ServiceClasses().Informer().GetStore().Add(getTestServiceClass())
+
+	instance := getTestServiceInstance()
+	startTime := metav1.NewTime(time.Now().Add(-7 * 24 * time.Hour))
+	instance.Status.OperationStartTime = &startTime
+
+	if err := testController.reconcileServiceInstance(instance); err != nil {
+		t.Fatalf("This should not fail : %v", err)
+	}
+
+	brokerActions := fakeServiceBrokerClient.Actions()
+	assertNumberOfServiceBrokerActions(t, brokerActions, 1)
+	assertProvision(t, brokerActions[0], &osb.ProvisionRequest{
+		AcceptsIncomplete: true,
+		InstanceID:        instanceGUID,
+		ServiceID:         serviceClassGUID,
+		PlanID:            planGUID,
+		Context: map[string]interface{}{
+			"platform":  "kubernetes",
+			"namespace": "test-ns",
+		},
+	})
+
+	actions := fakeCatalogClient.Actions()
+	assertNumberOfActions(t, actions, 1)
+
+	updatedServiceInstance := assertUpdateStatus(t, actions[0], instance)
+	assertServiceInstanceReadyTrue(t, updatedServiceInstance)
+	assertServiceInstanceOperationStartTimeSet(t, updatedServiceInstance, false)
+
+	// verify no kube resources created
+	// One single action comes from getting namespace uid
+	kubeActions := fakeKubeClient.Actions()
+	if err := checkKubeClientActions(kubeActions, []kubeClientAction{
+		{verb: "get", resourceName: "namespaces", checkType: checkGetActionType},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	events := getRecordedEvents(testController)
+	assertNumEvents(t, events, 1)
+
+	expectedEvent := api.EventTypeNormal + " " + successProvisionReason + " " + "The instance was provisioned successfully"
+	if e, a := expectedEvent, events[0]; e != a {
+		t.Fatalf("Received unexpected event: %v", a)
+	}
+}
+
+// TestReconcileServiceInstanceFailureOnFinalRetry verifies that reconciliation
+// completes in the event of an error after the retry duration elapses.
+func TestReconcileServiceInstanceFailureOnFinalRetry(t *testing.T) {
+	fakeKubeClient, fakeCatalogClient, fakeServiceBrokerClient, testController, sharedInformers := newTestController(t, fakeosb.FakeClientConfiguration{
+		ProvisionReaction: &fakeosb.ProvisionReaction{
+			Error: errors.New("fake creation failure"),
+		},
+	})
+
+	sharedInformers.ServiceBrokers().Informer().GetStore().Add(getTestServiceBroker())
+	sharedInformers.ServiceClasses().Informer().GetStore().Add(getTestServiceClass())
+
+	instance := getTestServiceInstance()
+	startTime := metav1.NewTime(time.Now().Add(-7 * 24 * time.Hour))
+	instance.Status.OperationStartTime = &startTime
+
+	if err := testController.reconcileServiceInstance(instance); err != nil {
+		t.Fatalf("Should have return no error because the retry duration has elapsed: %v", err)
+	}
+
+	brokerActions := fakeServiceBrokerClient.Actions()
+	assertNumberOfServiceBrokerActions(t, brokerActions, 1)
+	assertProvision(t, brokerActions[0], &osb.ProvisionRequest{
+		AcceptsIncomplete: true,
+		InstanceID:        instanceGUID,
+		ServiceID:         serviceClassGUID,
+		PlanID:            planGUID,
+		Context: map[string]interface{}{
+			"platform":  "kubernetes",
+			"namespace": "test-ns",
+		},
+	})
+
+	// verify no kube resources created
+	// One single action comes from getting namespace uid
+	kubeActions := fakeKubeClient.Actions()
+	if err := checkKubeClientActions(kubeActions, []kubeClientAction{
+		{verb: "get", resourceName: "namespaces", checkType: checkGetActionType},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	actions := fakeCatalogClient.Actions()
+	assertNumberOfActions(t, actions, 1)
+
+	updatedObject := assertUpdateStatus(t, actions[0], instance)
+	assertServiceInstanceReadyFalse(t, updatedObject)
+	assertServiceInstanceCondition(t, updatedObject, v1alpha1.ServiceInstanceConditionFailed, v1alpha1.ConditionTrue, errorReconciliationRetryTimeoutReason)
+	assertServiceInstanceOperationStartTimeSet(t, updatedObject, false)
+
+	expectedEventPrefixes := []string{
+		api.EventTypeWarning + " " + errorErrorCallingProvisionReason,
+		api.EventTypeWarning + " " + errorReconciliationRetryTimeoutReason,
+	}
+	events := getRecordedEvents(testController)
+	assertNumEvents(t, events, len(expectedEventPrefixes))
+
+	for i, e := range expectedEventPrefixes {
+		a := events[i]
+		if !strings.HasPrefix(a, e) {
+			t.Fatalf("Received unexpected event:\n  expected prefix: %v\n  got: %v", e, a)
+		}
+	}
+}
+
+// TestPollServiceInstanceSuccessOnFinalRetry verifies that polling
+// can succeed on the last attempt before timing out of the retry loop
+func TestPollServiceInstanceSuccessOnFinalRetry(t *testing.T) {
+	fakeKubeClient, fakeCatalogClient, fakeServiceBrokerClient, testController, sharedInformers := newTestController(t, fakeosb.FakeClientConfiguration{
+		PollLastOperationReaction: &fakeosb.PollLastOperationReaction{
+			Response: &osb.LastOperationResponse{
+				State:       osb.StateSucceeded,
+				Description: strPtr(lastOperationDescription),
+			},
+		},
+	})
+
+	sharedInformers.ServiceBrokers().Informer().GetStore().Add(getTestServiceBroker())
+	sharedInformers.ServiceClasses().Informer().GetStore().Add(getTestServiceClass())
+
+	instance := getTestServiceInstanceAsyncProvisioning(testOperation)
+	instanceKey := testNamespace + "/" + testServiceInstanceName
+	startTime := metav1.NewTime(time.Now().Add(-7 * 24 * time.Hour))
+	instance.Status.OperationStartTime = &startTime
+
+	if testController.pollingQueue.NumRequeues(instanceKey) != 0 {
+		t.Fatalf("Expected polling queue to not have any record of test instance")
+	}
+
+	if err := testController.pollServiceInstanceInternal(instance); err != nil {
+		t.Fatalf("pollServiceInstanceInternal failed: %s", err)
+	}
+
+	if testController.pollingQueue.NumRequeues(instanceKey) != 0 {
+		t.Fatalf("Expected polling queue to not have any record of test instance as polling should have completed")
+	}
+
+	brokerActions := fakeServiceBrokerClient.Actions()
+	assertNumberOfServiceBrokerActions(t, brokerActions, 1)
+	assertPollLastOperation(t, brokerActions[0], &osb.LastOperationRequest{
+		InstanceID: instanceGUID,
+		ServiceID:  strPtr(serviceClassGUID),
+		PlanID:     strPtr(planGUID),
+	})
+
+	// verify no kube resources created.
+	// No actions
+	kubeActions := fakeKubeClient.Actions()
+	assertNumberOfActions(t, kubeActions, 0)
+
+	actions := fakeCatalogClient.Actions()
+	assertNumberOfActions(t, actions, 1)
+
+	updatedServiceInstance := assertUpdateStatus(t, actions[0], instance)
+	// ServiceInstance should be ready and there no longer is an async operation
+	// in place.
+	assertServiceInstanceReadyTrue(t, updatedServiceInstance)
+	assertAsyncOpInProgressFalse(t, updatedServiceInstance)
+	assertServiceInstanceOperationStartTimeSet(t, updatedServiceInstance, false)
+}
+
+// TestPollServiceInstanceFailureOnFinalRetry verifies that polling
+// completes in the event of an error after the retry duration elapses.
+func TestPollServiceInstanceFailureOnFinalRetry(t *testing.T) {
+	fakeKubeClient, fakeCatalogClient, fakeServiceBrokerClient, testController, sharedInformers := newTestController(t, fakeosb.FakeClientConfiguration{
+		PollLastOperationReaction: &fakeosb.PollLastOperationReaction{
+			Response: &osb.LastOperationResponse{
+				State:       osb.StateInProgress,
+				Description: strPtr(lastOperationDescription),
+			},
+		},
+	})
+
+	sharedInformers.ServiceBrokers().Informer().GetStore().Add(getTestServiceBroker())
+	sharedInformers.ServiceClasses().Informer().GetStore().Add(getTestServiceClass())
+
+	instance := getTestServiceInstanceAsyncProvisioning(testOperation)
+	instanceKey := testNamespace + "/" + testServiceInstanceName
+	startTime := metav1.NewTime(time.Now().Add(-7 * 24 * time.Hour))
+	instance.Status.OperationStartTime = &startTime
+
+	if testController.pollingQueue.NumRequeues(instanceKey) != 0 {
+		t.Fatalf("Expected polling queue to not have any record of test instance")
+	}
+
+	if err := testController.pollServiceInstanceInternal(instance); err != nil {
+		t.Fatalf("Should have return no error because the retry duration has elapsed: %v", err)
+	}
+
+	if testController.pollingQueue.NumRequeues(instanceKey) != 0 {
+		t.Fatalf("Expected polling queue to not have any record of test instance as polling should have completed")
+	}
+
+	brokerActions := fakeServiceBrokerClient.Actions()
+	assertNumberOfServiceBrokerActions(t, brokerActions, 1)
+	assertPollLastOperation(t, brokerActions[0], &osb.LastOperationRequest{
+		InstanceID: instanceGUID,
+		ServiceID:  strPtr(serviceClassGUID),
+		PlanID:     strPtr(planGUID),
+	})
+
+	// there should have been 2 actions:
+	// (1) update the status with the last operation description
+	// (2) update the status with the Failed condition
+	actions := fakeCatalogClient.Actions()
+	assertNumberOfActions(t, actions, 2)
+
+	updatedServiceInstance := assertUpdateStatus(t, actions[0], instance)
+	assertServiceInstanceReadyFalse(t, updatedServiceInstance)
+
+	updatedServiceInstance = assertUpdateStatus(t, actions[1], instance)
+	assertServiceInstanceCondition(t, updatedServiceInstance, v1alpha1.ServiceInstanceConditionFailed, v1alpha1.ConditionTrue, errorReconciliationRetryTimeoutReason)
+	assertAsyncOpInProgressFalse(t, updatedServiceInstance)
+	assertServiceInstanceOperationStartTimeSet(t, updatedServiceInstance, false)
+
+	// verify no kube resources created.
+	// No actions
+	kubeActions := fakeKubeClient.Actions()
+	assertNumberOfActions(t, kubeActions, 0)
 }
 
 // TestSetServiceInstanceCondition ensures that with the expected conditions the
@@ -1946,5 +2190,152 @@ func TestUpdateServiceInstanceCondition(t *testing.T) {
 		if e, a := tc.message, outputCondition.Message; e != "" && e != a {
 			t.Errorf("%v: condition reasons didn't match; expected %v, got %v", tc.name, e, a)
 		}
+	}
+}
+
+func TestReconcileInstanceUsingOriginatingIdentity(t *testing.T) {
+	for _, tc := range originatingIdentityTestCases {
+		func() {
+			if tc.enableOriginatingIdentity {
+				err := utilfeature.DefaultFeatureGate.Set(fmt.Sprintf("%v=true", scfeatures.OriginatingIdentity))
+				if err != nil {
+					t.Fatalf("Failed to enable originating identity feature: %v", err)
+				}
+				defer utilfeature.DefaultFeatureGate.Set(fmt.Sprintf("%v=false", scfeatures.OriginatingIdentity))
+			}
+
+			fakeKubeClient, _, fakeBrokerClient, testController, sharedInformers := newTestController(t, fakeosb.FakeClientConfiguration{
+				ProvisionReaction: &fakeosb.ProvisionReaction{
+					Response: &osb.ProvisionResponse{
+						DashboardURL: &testDashboardURL,
+					},
+				},
+			})
+
+			addGetNamespaceReaction(fakeKubeClient)
+
+			sharedInformers.ServiceBrokers().Informer().GetStore().Add(getTestServiceBroker())
+			sharedInformers.ServiceClasses().Informer().GetStore().Add(getTestServiceClass())
+
+			instance := getTestServiceInstance()
+			if tc.includeUserInfo {
+				instance.Spec.UserInfo = testUserInfo
+			}
+
+			if err := testController.reconcileServiceInstance(instance); err != nil {
+				t.Fatalf("This should not fail : %v", err)
+			}
+
+			brokerActions := fakeBrokerClient.Actions()
+			assertNumberOfServiceBrokerActions(t, brokerActions, 1)
+			actualRequest, ok := brokerActions[0].Request.(*osb.ProvisionRequest)
+			if !ok {
+				t.Errorf("%v: unexpected request type; expected %T, got %T", tc.name, &osb.ProvisionRequest{}, actualRequest)
+				return
+			}
+			var expectedOriginatingIdentity *osb.AlphaOriginatingIdentity
+			if tc.expectedOriginatingIdentity {
+				expectedOriginatingIdentity = testOriginatingIdentity
+			}
+			assertOriginatingIdentity(t, expectedOriginatingIdentity, actualRequest.OriginatingIdentity)
+		}()
+	}
+}
+
+func TestReconcileInstanceDeleteUsingOriginatingIdentity(t *testing.T) {
+	for _, tc := range originatingIdentityTestCases {
+		func() {
+			if tc.enableOriginatingIdentity {
+				utilfeature.DefaultFeatureGate.Set(fmt.Sprintf("%v=true", scfeatures.OriginatingIdentity))
+				defer utilfeature.DefaultFeatureGate.Set(fmt.Sprintf("%v=false", scfeatures.OriginatingIdentity))
+			}
+
+			_, fakeCatalogClient, fakeBrokerClient, testController, sharedInformers := newTestController(t, fakeosb.FakeClientConfiguration{
+				DeprovisionReaction: &fakeosb.DeprovisionReaction{
+					Response: &osb.DeprovisionResponse{},
+				},
+			})
+
+			sharedInformers.ServiceBrokers().Informer().GetStore().Add(getTestServiceBroker())
+			sharedInformers.ServiceClasses().Informer().GetStore().Add(getTestServiceClass())
+
+			instance := getTestServiceInstance()
+			instance.ObjectMeta.DeletionTimestamp = &metav1.Time{}
+			instance.ObjectMeta.Finalizers = []string{v1alpha1.FinalizerServiceCatalog}
+			// we only invoke the broker client to deprovision if we have a
+			// ReconciledGeneration set as that implies a previous success.
+			instance.Status.ReconciledGeneration = 1
+			if tc.includeUserInfo {
+				instance.Spec.UserInfo = testUserInfo
+			}
+
+			fakeCatalogClient.AddReactor("get", "instances", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+				return true, instance, nil
+			})
+
+			err := testController.reconcileServiceInstance(instance)
+			if err != nil {
+				t.Fatalf("This should not fail")
+			}
+
+			brokerActions := fakeBrokerClient.Actions()
+			assertNumberOfServiceBrokerActions(t, brokerActions, 1)
+			actualRequest, ok := brokerActions[0].Request.(*osb.DeprovisionRequest)
+			if !ok {
+				t.Errorf("%v: unexpected request type; expected %T, got %T", tc.name, &osb.DeprovisionRequest{}, actualRequest)
+				return
+			}
+			var expectedOriginatingIdentity *osb.AlphaOriginatingIdentity
+			if tc.expectedOriginatingIdentity {
+				expectedOriginatingIdentity = testOriginatingIdentity
+			}
+			assertOriginatingIdentity(t, expectedOriginatingIdentity, actualRequest.OriginatingIdentity)
+		}()
+	}
+}
+
+func TestPollInstanceUsingOriginatingIdentity(t *testing.T) {
+	for _, tc := range originatingIdentityTestCases {
+		func() {
+			if tc.enableOriginatingIdentity {
+				utilfeature.DefaultFeatureGate.Set(fmt.Sprintf("%v=true", scfeatures.OriginatingIdentity))
+				defer utilfeature.DefaultFeatureGate.Set(fmt.Sprintf("%v=false", scfeatures.OriginatingIdentity))
+			}
+
+			_, _, fakeBrokerClient, testController, sharedInformers := newTestController(t, fakeosb.FakeClientConfiguration{
+				PollLastOperationReaction: &fakeosb.PollLastOperationReaction{
+					Response: &osb.LastOperationResponse{
+						State:       osb.StateInProgress,
+						Description: strPtr(lastOperationDescription),
+					},
+				},
+			})
+
+			sharedInformers.ServiceBrokers().Informer().GetStore().Add(getTestServiceBroker())
+			sharedInformers.ServiceClasses().Informer().GetStore().Add(getTestServiceClass())
+
+			instance := getTestServiceInstanceAsyncProvisioning(testOperation)
+			if tc.includeUserInfo {
+				instance.Spec.UserInfo = testUserInfo
+			}
+
+			err := testController.pollServiceInstanceInternal(instance)
+			if err != nil {
+				t.Fatalf("Expected pollServiceInstanceInternal to not fail while in progress")
+			}
+
+			brokerActions := fakeBrokerClient.Actions()
+			assertNumberOfServiceBrokerActions(t, brokerActions, 1)
+			actualRequest, ok := brokerActions[0].Request.(*osb.LastOperationRequest)
+			if !ok {
+				t.Errorf("%v: unexpected request type; expected %T, got %T", tc.name, &osb.LastOperationRequest{}, actualRequest)
+				return
+			}
+			var expectedOriginatingIdentity *osb.AlphaOriginatingIdentity
+			if tc.expectedOriginatingIdentity {
+				expectedOriginatingIdentity = testOriginatingIdentity
+			}
+			assertOriginatingIdentity(t, expectedOriginatingIdentity, actualRequest.OriginatingIdentity)
+		}()
 	}
 }

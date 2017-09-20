@@ -92,6 +92,8 @@ const (
 	errorNonbindableServiceClassReason         string = "ErrorNonbindableServiceClass"
 	errorServiceInstanceNotReadyReason         string = "ErrorInstanceNotReady"
 	errorPollingLastOperationReason            string = "ErrorPollingLastOperation"
+	errorWithOriginatingIdentity               string = "Error with Originating Identity"
+	errorReconciliationRetryTimeoutReason      string = "ErrorReconciliationRetryTimeout"
 
 	successInjectedBindResultReason    string = "InjectedBindResult"
 	successInjectedBindResultMessage   string = "Injected bind result"
@@ -113,8 +115,8 @@ const (
 // shouldReconcileServiceBroker determines whether a broker should be reconciled; it
 // returns true unless the broker has a ready condition with status true and
 // the controller's broker relist interval has not elapsed since the broker's
-// ready condition became true.
-func shouldReconcileServiceBroker(broker *v1alpha1.ServiceBroker, now time.Time, relistInterval time.Duration) bool {
+// ready condition became true, or if the broker's RelistBehavior is set to Manual.
+func shouldReconcileServiceBroker(broker *v1alpha1.ServiceBroker, now time.Time) bool {
 	if broker.Status.ReconciledGeneration != broker.Generation {
 		// If the spec has changed, we should reconcile the broker.
 		return true
@@ -131,12 +133,39 @@ func shouldReconcileServiceBroker(broker *v1alpha1.ServiceBroker, now time.Time,
 			// The broker has a ready condition
 
 			if condition.Status == v1alpha1.ConditionTrue {
+
 				// The broker's ready condition has status true, meaning that
 				// at some point, we successfully listed the broker's catalog.
-				// We should reconcile the broker (relist the broker's
-				// catalog) if it has been longer than the configured relist
-				// interval since the broker's ready condition became true.
-				return now.After(condition.LastTransitionTime.Add(relistInterval))
+				if broker.Spec.RelistBehavior == v1alpha1.ServiceBrokerRelistBehaviorManual {
+					// If a broker is configured with RelistBehaviorManual, it should
+					// ignore the Duration and only relist based on spec changes
+
+					glog.V(10).Infof(
+						"Not processing ServiceBroker %v: RelistBehavior is set to Manual",
+						broker.Name,
+					)
+					return false
+				}
+
+				if broker.Spec.RelistDuration == nil {
+					glog.Errorf(
+						"Unable to process ServiceBroker %v: RelistBehavior is set to Duration with a nil RelistDuration value",
+						broker.Name,
+					)
+					return false
+				}
+
+				// By default, the broker should relist if it has been longer than the
+				// RelistDuration since the broker's ready condition became true.
+				duration := broker.Spec.RelistDuration.Duration
+				intervalPassed := now.After(condition.LastTransitionTime.Add(duration))
+				if intervalPassed == false {
+					glog.V(10).Infof(
+						"Not processing ServiceBroker %v because RelistDuration has not elapsed since the broker became ready",
+						broker.Name,
+					)
+				}
+				return intervalPassed
 			}
 
 			// The broker's ready condition wasn't true; we should try to re-
@@ -169,13 +198,11 @@ func (c *controller) reconcileServiceBrokerKey(key string) error {
 func (c *controller) reconcileServiceBroker(broker *v1alpha1.ServiceBroker) error {
 	glog.V(4).Infof("Processing ServiceBroker %v", broker.Name)
 
-	// If the broker's ready condition is true and the relist interval has not
+	// * If the broker's ready condition is true and the RelistBehavior has been
+	// set to Manual, do not reconcile it.
+	// * If the broker's ready condition is true and the relist interval has not
 	// elapsed, do not reconcile it.
-	if !shouldReconcileServiceBroker(broker, time.Now(), c.brokerRelistInterval) {
-		glog.V(10).Infof(
-			"Not processing ServiceBroker %v because relist interval has not elapsed since the broker became ready",
-			broker.Name,
-		)
+	if !shouldReconcileServiceBroker(broker, time.Now()) {
 		return nil
 	}
 
@@ -202,6 +229,7 @@ func (c *controller) reconcileServiceBroker(broker *v1alpha1.ServiceBroker) erro
 		}
 
 		glog.V(4).Infof("Adding/Updating ServiceBroker %v", broker.Name)
+		now := metav1.Now()
 		brokerCatalog, err := brokerClient.GetCatalog()
 		if err != nil {
 			s := fmt.Sprintf("Error getting broker catalog for broker %q: %s", broker.Name, err)
@@ -209,9 +237,49 @@ func (c *controller) reconcileServiceBroker(broker *v1alpha1.ServiceBroker) erro
 			c.recorder.Eventf(broker, api.EventTypeWarning, errorFetchingCatalogReason, s)
 			c.updateServiceBrokerCondition(broker, v1alpha1.ServiceBrokerConditionReady, v1alpha1.ConditionFalse, errorFetchingCatalogReason,
 				errorFetchingCatalogMessage+s)
+			if broker.Status.OperationStartTime == nil {
+				clone, err := api.Scheme.DeepCopy(broker)
+				if err == nil {
+					toUpdate := clone.(*v1alpha1.ServiceBroker)
+					toUpdate.Status.OperationStartTime = &now
+					_, err := c.serviceCatalogClient.ServiceBrokers().UpdateStatus(toUpdate)
+					if err != nil {
+						glog.Errorf("Error updating operation start time of ServiceBroker %q: %v", broker.Name, err)
+					}
+				}
+			} else if !time.Now().Before(broker.Status.OperationStartTime.Time.Add(c.reconciliationRetryDuration)) {
+				s := fmt.Sprintf("Stopping reconciliation retries on ServiceBroker %q because too much time has elapsed", broker.Name)
+				glog.Info(s)
+				c.recorder.Event(broker, api.EventTypeWarning, errorReconciliationRetryTimeoutReason, s)
+				clone, err := api.Scheme.DeepCopy(broker)
+				if err == nil {
+					toUpdate := clone.(*v1alpha1.ServiceBroker)
+					toUpdate.Status.OperationStartTime = nil
+					toUpdate.Status.ReconciledGeneration = toUpdate.Generation
+					c.updateServiceBrokerCondition(toUpdate,
+						v1alpha1.ServiceBrokerConditionFailed,
+						v1alpha1.ConditionTrue,
+						errorReconciliationRetryTimeoutReason,
+						s)
+				}
+				return nil
+			}
 			return err
 		}
 		glog.V(5).Infof("Successfully fetched %v catalog entries for ServiceBroker %v", len(brokerCatalog.Services), broker.Name)
+
+		if broker.Status.OperationStartTime != nil {
+			clone, err := api.Scheme.DeepCopy(broker)
+			if err != nil {
+				return err
+			}
+			toUpdate := clone.(*v1alpha1.ServiceBroker)
+			toUpdate.Status.OperationStartTime = nil
+			if _, err := c.serviceCatalogClient.ServiceBrokers().UpdateStatus(toUpdate); err != nil {
+				glog.Errorf("Error updating operation start time of ServiceBroker %q: %v", broker.Name, err)
+				return err
+			}
+		}
 
 		glog.V(4).Infof("Converting catalog response for ServiceBroker %v into service-catalog API", broker.Name)
 		catalog, err := convertCatalog(brokerCatalog)
