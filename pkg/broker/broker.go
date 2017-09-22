@@ -18,11 +18,11 @@ package broker
 
 import (
 	"fmt"
+	"github.com/golang/glog"
+	"github.com/rs/xid"
 	"io/ioutil"
 	"net/http"
 	"sync"
-	"github.com/golang/glog"
-	"github.com/rs/xid"
 
 	"github.com/kubernetes-incubator/service-catalog/pkg/brokerapi"
 	"github.com/minio/minio-go"
@@ -164,7 +164,7 @@ func (b *broker) CreateServiceInstance(instanceID string, req *brokerapi.CreateS
 	}
 	// Check required parameter "bucketName"
 	bucketName, ok := req.Parameters["bucketName"].(string)
-	if ! ok {
+	if !ok {
 		glog.Errorf("Bucket name not provided, generating random name.")
 		bucketName = xid.New().String()
 	}
@@ -198,7 +198,7 @@ func (b *broker) RemoveServiceInstance(instanceID, serviceID, planID string, acc
 	b.rwMutex.Lock()
 	defer b.rwMutex.Unlock()
 	instance, ok := b.instanceMap[instanceID]
-	if ! ok {
+	if !ok {
 		glog.Errorf("InstanceID %q not found.", instanceID)
 		return nil, fmt.Errorf("Broker cannot find instanceID %q.", instanceID)
 	}
@@ -222,7 +222,7 @@ func (b *broker) RemoveServiceInstance(instanceID, serviceID, planID string, acc
 func (b *broker) Bind(instanceID, bindingID string, req *brokerapi.BindingRequest) (*brokerapi.CreateServiceBindingResponse, error) {
 	glog.Infof("Bind called. instanceID: %q", instanceID)
 	instance, ok := b.instanceMap[instanceID]
-	if ! ok {
+	if !ok {
 		glog.Errorf("Instance ID %q not found.")
 		return nil, fmt.Errorf("Instance ID %q not found.", instanceID)
 	}
