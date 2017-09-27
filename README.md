@@ -10,7 +10,7 @@ A core feature of the Kubernetes system is the ability to provision a diverse
 offering of block and file storage on demand.  This project seeks to demonstrate
 that by using the Kubernetes-Incubator's Service-Catalog, it is now also possible
 to bring this dynamic provisioning to S3 object storage.  This broker is designed
-to be used with Gluster-Kubernetes S3.
+to be used with [Gluster-Kubernetes](https://github.com/jarrpa/gluster-kubernetes).
 
 See our detailed [command flow diagram](./docs/Service-Catalog-Published.png) for
  an overview of the system.
@@ -19,10 +19,10 @@ See our detailed [command flow diagram](./docs/Service-Catalog-Published.png) fo
 This broker implements OpenServiceBroker methods for creating, connecting to, and destroying
 object buckets.
 - For each new Service Instance, a new, unquiely named bucket is created.
-- For each binding to a Service Instance, a Secret is generated with the
+- For each new Service Instance Credential, a Secret is generated with the
 coordinates and credentials of the Service Instance's associated bucket.
 - Deleting a Service Instance destroys the associated bucket.
-- Deleting a Binding deletes the secret.  Nothing is done on the broker side.  This
+- Deleting a Service Credential deletes the secret.  Nothing is done on the broker side.  This
 is because the broker does not perform any actions on Bind, so there is nothing to
 undo.
 
@@ -41,15 +41,15 @@ undo.
 
 ### Topology
 There are two primary systems that make up this demonstration.  They are the Broker
-and it's colocated CNS Object store.  They fill the role of our micro-service provider.
-The second system will be the locally running Kubernetes cluster on which with Service-Catalog is deployed.  This cluster will be our micro-server client.  Please refer to the [command flow diagram](./docs/Service-Catalog-Published.png) for a more in depth look at these systems.
+and its colocated CNS Object store.  They fill the role of our micro-service provider.
+A second system will be the locally running Kubernetes cluster on which with Service-Catalog is deployed.  This cluster will be our micro-server client.  Please refer to the [command flow diagram](./docs/Service-Catalog-Published.png) for a more in depth look at these systems.
 
 ## Setup
 #### Step 0: Preparing environment
-- Install Google SDK and add `gcloud` to `PATH`.  You must have an active Google
+- Install [Google SDK](https://cloud.google.com/sdk/) and add `gcloud` to `PATH`.  You must have an active Google
 Cloud Platform account.
-- Clone CNS Object Broker
-- Clone Kubernetes
+- Clone [CNS Object Broker](https://github.com/copejon/cns-object-broker)
+- Clone [Kubernetes](https://github.com/kubernetes)
 - Configure `gcloud` user, zone, and project.  These are detected by the deployment script and required to setup. Alternatively, you can specify these values as environment variables or inline.  At a minimum, required variables are:
 
 ```
@@ -66,7 +66,7 @@ variables relative to GCP Instance settings.  These can be defined inline with `
 
 Runtime take around 5 to 10 minutes.  Go get some coffee.
 
-When deployment completes, commands to ssh into the master node and the URL of the CNS Object Broker will be output.  Make a note of the URL especially.
+When deployment completes, commands to ssh into the master node and the URL of the CNS Object Broker will be output. **Note the URL and PORT.**
 
 #### Step 2: Spin up a Local Kubernetes Cluster
 This step sets up the **K8s Cluster** portion of our topology (see [diagram](./docs/Service-Catalog-Published.png)).
