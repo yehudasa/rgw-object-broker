@@ -40,7 +40,7 @@ undo.
 ### Topology
 There are two primary systems that make up this demonstration.  They are the Broker
 and its colocated CNS Object store.  They fill the role of our micro-service provider.
-A second system will be the locally running Kubernetes cluster on which with Service-Catalog is deployed.  This cluster will be our micro-server client.  Please refer to the [command flow diagram](./docs/Service-Catalog-Published.png) for a more in depth look at these systems.
+A second system will be the locally running Kubernetes cluster on which with Service-Catalog is deployed.  This cluster will be our micro-server client.  Please refer to the [command flow diagram](./docs/control-diag.md) for a more in depth look at these systems.
 
 ## Setup
 ### Step 0: Preparing environment
@@ -78,7 +78,7 @@ This step sets up the **K8s Cluster** portion of our topology (see [diagram](./d
 2. Follow the [Service-Catalog Installation instructions](https://github.com/kubernetes-incubator/service-catalog/blob/master/docs/introduction.md#installation).  Once the Service-Catalog is deployed, return here.
 
 
-## Using Service Catalog
+## Using the Service Catalog
 
 **STOP!** If you have made it this far, it is assumed that you now have
 
@@ -90,7 +90,7 @@ You can check the status of all these components at once by executing
 
 `# gcloud compute ssh <master node name> --command="kubectl get pod,svc --all-namespaces"`
 
-### Create the ServiceBroker (API Object)
+### Create the *ServiceBroker* (API Object)
 
 Change to the `cns-object-broker` directory created when cloning the repo.
 
@@ -115,19 +115,19 @@ Change to the `cns-object-broker` directory created when cloning the repo.
 
 1.  Edit *examples/service-catalog/service-broker.yaml*
 
-    Set the value of
+    Set the value of:
     ```yaml
     spec:
       url: http://<ExternalIP>:<ExternalPort>
     ```
 
-2. Create the Broker api object.
+2. Create the *ServiceBroker* api object.
 
     `# kubectl --context=service-catalog create -f examples/service-catalog/service-broker.yaml`
 
-3. Verify the `ServiceBroker`.
+3. Verify the *ServiceBroker*.
 
-    If successful, the service-catalog controller will have generated a `ServiceClass` for the `cns-bucket-service`
+    If successful, the service-catalog controller will have generated a *ServiceClass* for the `cns-bucket-service`
 
     `# kubectl --context=service-catalog get servicebroker,serviceclasses`
 
@@ -139,43 +139,64 @@ Change to the `cns-object-broker` directory created when cloning the repo.
     serviceclasses/cns-bucket-service   28s
     ```
 
-    If you do not see a `ServiceClass` object, see [troubleshooting](//TODO). //TODO
+    If you do not see a *ServiceClass* object, see [Troubleshooting](#Troubleshooting). //TODO
 
-### Create the ServiceInstance (API Object)
+### Create the *ServiceInstance* (API Object)
 
-1. `ServiceInstances` are Namespaced.  Before proceeding, it must be created.
+1. *ServiceInstances* are Namespaced.  Before proceeding, the *Namespace* must be created.
 
     `# kubectl create namespace test-ns`
 
-2. Now create the `ServiceInstance`.
+    *Note:* To change the *Namespace* name, edit *examples/service-catalog/service-instance.yaml*
+
+    Snippet:
+    ```yaml
+    kind: ServiceInstance
+    metadata:
+      namespace: test-ns  # Edit
+    ```
+
+2. Now create the *ServiceInstance*.
+
+    *Optional:* Set a custom bucket name.  If one is not provided, a random GUID is generated.  Edit *examples/service-catalog/service-instance.yaml*
+
+    Snippet:
+    ```yaml
+    spec:
+      parameters:
+        bucketName: "cns-bucket-demo" #Optional
+    ```
+
+    Create the ServiceInstance.
 
     `# kubectl --context=service-catalog create -f examples/service-catalog/service-instance.yaml`
 
-3. Verify the `ServiceInstance`.
+3. Verify the *ServiceInstance*.
 
     `# kubectl --context=service-catalog -n test-ns get serviceinstance cns-bucket-instance -o yaml`
 
     Look for the these values in the ouput:
 
+    Snippet:
     ```yaml
     status:
       conditions:
         reason: ProvisionedSuccessfully
         message: The instance was provisioned successfully
     ```
-    If the `ServiceInstance` fails to create, see [troubleshooting](//TODO). //TODO
+    If the *ServiceInstance* fails to create, see [troubleshooting](//TODO). //TODO
 
-### Create the ServiceInstanceCredential (API Object)
+### Create the *ServiceInstanceCredential* (API Object)
 
-1. Create the `ServiceInstanceCredential`.
+1. Create the *ServiceInstanceCredential*.
 
     `# kubectl --context=service-catalog create -f examples/service-catalog/service-instance-credential.yaml`
 
-2. Verify the `ServiceInstanceCredential`.
+2. Verify the *ServiceInstanceCredential*.
 
     `# kubectl --context=service-catalog -n test-ns get serviceinstancecredentials`
 
-    `ServiceInstanceCredentials` will result in a `Secret` being created in same Namespace.  Check for the secret:
+    *ServiceInstanceCredentials* will result in a *Secret* being created in same Namespace.  Check for the secret:
 
     `# kubectl -n test-ns get secret cns-bucket-credentials`
 
@@ -188,29 +209,16 @@ Change to the `cns-object-broker` directory created when cloning the repo.
 
     `#  kubectl -n test-ns get secret cns-bucket-credentials -o yaml`
 
+    Snippet:
     ```yaml
     apiVersion: v1
+    kind: Secret
     data:
       bucketEndpoint: MTA0LjE5Ny40LjIzOTozMDI5OA==
       bucketID: amNvcGU6amNvcGU=
       bucketName: Y25zLWJ1Y2tldC1kZW1v
       bucketPword: amNvcGU=
-    kind: Secret
-    metadata:
-      creationTimestamp: 2017-09-28T21:58:58Z
-      name: cns-bucket-credentials
-      namespace: test-ns
-      ownerReferences:
-      - apiVersion: servicecatalog.k8s.io/v1alpha1
-        blockOwnerDeletion: true
-        controller: true
-        kind: ServiceInstanceCredential
-        name: cns-bucket-credentials
-        uid: 3ac548e9-a498-11e7-b5eb-0242ac110004
-      resourceVersion: "5727"
-      selfLink: /api/v1/namespaces/test-ns/secrets/cns-bucket-credentials
-      uid: 3ae1325f-a498-11e7-bb54-0050562766cb
-    type: Opaque
+
     ```
 
 ## Troubleshooting

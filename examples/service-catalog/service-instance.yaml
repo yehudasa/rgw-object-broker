@@ -7,4 +7,4 @@ spec:
   serviceClassName: cns-bucket-service
   planName: default
   parameters:
-    bucketName: "cns-bucket-demo" # Required
+    bucketName: "cns-bucket-demo" # Optional
