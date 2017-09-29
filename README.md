@@ -30,6 +30,11 @@ undo.
 
 ### Limitations
 
+- Currently, the CNS Object Broker is dependent on GCE.  If run outside of a GCE environment, it will fail to start.  This is because the Broker detects the external IP of the node on which it is run.
+It pairs this IP with the port of the gluster-s3-deployment *Service* to generate the coordinaates returned in the *ServiceInstanceCredential*.  This is not a requirement of brokers in general.
+
+- As it is implemented, the CNS Object Broker must run on the same Kubernetes cluster as the gluster-s3-deployment.  This is because it uses a kube api client to get the gluser-s3-deployment's *Service* from which is parses it's external port. This is not a requirement of brokers in general.
+
 - Auth:  The S3 api implementation (Gluster-Swift) does not enforce any authentication / authorization.
 Each new bucket, regardless of the *Namespace* of its *ServiceInstance*, is accessible and mutable by anyone with the coordinates of the S3 server.
 
