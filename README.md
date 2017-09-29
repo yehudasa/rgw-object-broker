@@ -13,7 +13,7 @@ to bring this dynamic provisioning to S3 object storage.
 This broker is designed
 to be used with [Gluster-Kubernetes](https://github.com/jarrpa/gluster-kubernetes).
 
-See our detailed [command flow diagram](./docs/Service-Catalog-Published.png) for
+See our detailed [command flow diagram](docs/diagram/control-diag.md) for
  an overview of the system.
 
 ### What It Does
@@ -60,7 +60,7 @@ It is only for the purpose of this demo that we decided deploy the Broker and th
 
 A second system will be the locally running Kubernetes cluster on which with Service-Catalog is deployed
 This cluster will be our micro-server client
-Please refer to the [command flow diagram](./docs/control-diag.md) for a more in depth look at these systems.
+Please refer to the [command flow diagram](docs/diagram/control-diag.md) for a more in depth look at these systems.
 
 ## Setup
 ### Step 0: Preparing environment
@@ -80,7 +80,7 @@ These are detected by the deployment script and required for setup.
 
 
 ### Step 1: Deploy Gluster-Kubernetes cluster in Google Compute Engine (GCE)
-This step sets up the **External Service Provider** portion of our topology (see [diagram](./docs/Service-Catalog-Published.png)).
+This step sets up the **External Service Provider** portion of our topology (see [diagram](docs/diagram/control-diag.md)).
 
 To kick off deployment, run `gk-cluster-deploy/deploy/cluster/gk-up.sh`
 The script has a number of configurable variables relative to GCE Instance settings
@@ -94,7 +94,7 @@ Alternatively, you can manually deploy the GCE portion by following [these instu
 When deployment completes, commands to ssh into the master node and the URL of the CNS Object Broker will be output. **Note the URL and PORT.**
 
 ### Step 2: Deploy the Service-Catalog
-This step sets up the **K8s Cluster** portion of our topology (see [diagram](./docs/Service-Catalog-Published.png)).
+This step sets up the **K8s Cluster** portion of our topology (see [diagram](docs/diagram/control-diag.md)).
 
 *In a separate terminal:*
 1. Change directories to the `service-catalog` repository.
@@ -167,7 +167,7 @@ Change to the `cns-object-broker` directory created when cloning the repo.
     serviceclasses/cns-bucket-service   28s
     ```
 
-    If you do not see a *ServiceClass* object, see [Troubleshooting](#Troubleshooting). //TODO
+    If you do not see a *ServiceClass* object, see [Debugging](#debugging). //TODO
 
 ### Create the *ServiceInstance* (API Object)
 
@@ -213,7 +213,7 @@ Change to the `cns-object-broker` directory created when cloning the repo.
         reason: ProvisionedSuccessfully
         message: The instance was provisioned successfully
     ```
-    If the *ServiceInstance* fails to create, see [troubleshooting](//TODO). //TODO
+    If the *ServiceInstance* fails to create, see [Debugging](#debugging). //TODO
 
 ### Create the *ServiceInstanceCredential* (API Object)
 
@@ -248,10 +248,54 @@ Change to the `cns-object-broker` directory created when cloning the repo.
       bucketID: amNvcGU6amNvcGU=
       bucketName: Y25zLWJ1Y2tldC1kZW1v
       bucketPword: amNvcGU=
-
     ```
 
-## Troubleshooting
+    Decode the data:
 
-// TODO
-- Broker Log
+    `echo "<value>"" | base64 -d`
+
+## Debugging
+
+#### Broker Log
+
+To determine if the broker has encountered an error that may be impacting *ServiceInstance* creation,
+it can be useful to examine the broker's log.
+
+1. Access the Broker log by first sshing into the GCE cluster.
+
+    `gcloud compute ssh <master node name>`
+
+2. Get the unique name of the Broker *Pod*.
+
+    `kubectl get pods -n broker`
+
+3. Using the Broker *Pod's* name, use `kubectl` to output the logs.
+
+    `kubectl -n broker logs -f <broker pod name>`
+
+####  Inspecting Service-Catalog API Objects
+
+Service-Catalog objects can return yaml or json formatted date just like core Kubernetes api objects.
+To output the data, the command is very similar:
+
+`kubectl --context=service-catalog get <service-catalog object>`
+
+Where `<service-catalog object>` can be:
+- `servicebroker`
+- `serviceclass`
+- `serviceinstance`
+- `serviceinstancecredential`
+
+#### Redeploy Service Catalog
+
+Sometimes it's just quicker to tear it down and start again.  Thanks to Helm, this is relatively painless to do.
+
+1. Tear down Service-Catalog
+
+    `helm delete --purge catalog`
+
+2. Deploy Service-Catalog
+
+    `helm install charts/catalog --name catalog --namespace catalog`
+
+Once Service-Catalog has returned to a Running/Ready status, you can begin again by [creating a ServiceBroker object](#create-the-servicebroker-api-object).
