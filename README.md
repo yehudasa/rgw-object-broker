@@ -17,12 +17,16 @@ See our detailed [command flow diagram](./docs/Service-Catalog-Published.png) fo
 ### What It Does
 This broker implements OpenServiceBroker methods for creating, connecting to, and destroying
 object buckets.
-- For each new Service Instance, a new, unquiely named bucket is created.
+- For each new Service Instance, a new, uniquely named bucket is created.
 - For each new Service Instance Credential, a Secret is generated with the
 coordinates and credentials of the Service Instance's associated bucket.
 - Deleting a Service Instance destroys the associated bucket.
 - Deleting a Service Instance Credential deletes the secret.  Nothing is done on the broker side.  This is because the broker does not perform any actions on Bind, so there is nothing to
 undo.
+
+### Limitations
+
+// TODO
 
 ## Installation
 
@@ -38,8 +42,8 @@ undo.
 - A [Google Cloud Platform](https://cloud.google.com/compute/) account.
 
 ### Topology
-There are two primary systems that make up this demonstration.  They are the Broker
-and its colocated CNS Object store.  They fill the role of our micro-service provider.
+There are two primary systems that make up this demonstration.  They are the Broker and its colocated CNS Object store.  It should be noted that the Broker can be implemented to run anywhere.  They fill the role of our micro-service provider.  It is only for the purpose of this demo that we decided deploy the Broker and the CNS Cluster in the same location.   
+
 A second system will be the locally running Kubernetes cluster on which with Service-Catalog is deployed.  This cluster will be our micro-server client.  Please refer to the [command flow diagram](./docs/control-diag.md) for a more in depth look at these systems.
 
 ## Setup
@@ -60,8 +64,7 @@ A second system will be the locally running Kubernetes cluster on which with Ser
 ### Step 1: Deploy Gluster-Kubernetes cluster in Google Compute Engine (GCE)
 This step sets up the **External Service Provider** portion of our topology (see [diagram](./docs/Service-Catalog-Published.png)).
 
-To kick off deployment, run `gk-cluster-deploy/deploy/cluster/gk-up.sh`.  The script has a number of configurable
-variables relative to GCE Instance settings.  These can be defined inline with `gk-up.sh` or as environment variables.  To run the script as fire and forget, pass `-y` to skip configuration review.
+To kick off deployment, run `gk-cluster-deploy/deploy/cluster/gk-up.sh`.  The script has a number of configurable variables relative to GCE Instance settings.  They can be found in `deploy/cluster/lib/config.sh`  These can be overridden inline with `gk-up.sh` or as environment variables. To run the script with out pausing run`gk-up.sh -y`.
 
 Runtime takes around 5 to 10 minutes.  Go get some coffee.
 
@@ -224,3 +227,4 @@ Change to the `cns-object-broker` directory created when cloning the repo.
 ## Troubleshooting
 
 // TODO
+- Broker Log
