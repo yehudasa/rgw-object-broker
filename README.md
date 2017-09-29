@@ -6,9 +6,11 @@ The work in this project is a proof of concept and not intended production.
 
 ## Overview
 A core feature of the Kubernetes system is the ability to provision a diverse
-offering of block and file storage on demand.  This project seeks to demonstrate
+offering of block and file storage on demand.
+This project seeks to demonstrate
 that by using the Kubernetes-Incubator's Service-Catalog, it is now also possible
-to bring this dynamic provisioning to S3 object storage.  This broker is designed
+to bring this dynamic provisioning to S3 object storage.
+This broker is designed
 to be used with [Gluster-Kubernetes](https://github.com/jarrpa/gluster-kubernetes).
 
 See our detailed [command flow diagram](./docs/Service-Catalog-Published.png) for
@@ -21,12 +23,19 @@ object buckets.
 - For each new Service Instance Credential, a Secret is generated with the
 coordinates and credentials of the Service Instance's associated bucket.
 - Deleting a Service Instance destroys the associated bucket.
-- Deleting a Service Instance Credential deletes the secret.  Nothing is done on the broker side.  This is because the broker does not perform any actions on Bind, so there is nothing to
+- Deleting a Service Instance Credential deletes the secret.
+Nothing is done on the broker side.
+This is because the broker does not perform any actions on Bind, so there is nothing to
 undo.
 
 ### Limitations
 
-// TODO
+- Auth:  The S3 api implementation (Gluster-Swift) does not enforce any authentication / authorization.
+Each new bucket, regardless of the *Namespace* of its *ServiceInstance*, is accessible and mutable by anyone with the coordinates of the S3 server.
+
+- Flat Bucket Hierarchy:  Gluster-Swift's S3 implementation allows for nested buckets.
+However, we have written the CNS Object Broker utilizing the minio-go S3 client, which has no concept of nested buckets.
+This results in an artificially flat bucket hierarchy.
 
 ## Installation
 
@@ -42,16 +51,25 @@ undo.
 - A [Google Cloud Platform](https://cloud.google.com/compute/) account.
 
 ### Topology
-There are two primary systems that make up this demonstration.  They are the Broker and its colocated CNS Object store.  It should be noted that the Broker can be implemented to run anywhere.  They fill the role of our micro-service provider.  It is only for the purpose of this demo that we decided deploy the Broker and the CNS Cluster in the same location.   
+There are two primary systems that make up this demonstration
+They are the Broker and its colocated CNS Object store.
+It should be noted that the Broker can be implemented to run anywhere
+They fill the role of our micro-service provider
+It is only for the purpose of this demo that we decided deploy the Broker and the CNS Cluster in the same location
 
-A second system will be the locally running Kubernetes cluster on which with Service-Catalog is deployed.  This cluster will be our micro-server client.  Please refer to the [command flow diagram](./docs/control-diag.md) for a more in depth look at these systems.
+
+A second system will be the locally running Kubernetes cluster on which with Service-Catalog is deployed
+This cluster will be our micro-server client
+Please refer to the [command flow diagram](./docs/control-diag.md) for a more in depth look at these systems.
 
 ## Setup
 ### Step 0: Preparing environment
 - Clone [Kubernetes](https://github.com/kubernetes)
 - Clone [Service-Catalog](https://github.com/kubernetes-incubator/service-catalog)
-- Install [Google SDK](https://cloud.google.com/sdk/) and add `gcloud` to `PATH`.  You must have an active Google Cloud Platform account.
-- Configure `gcloud` user, zone, and project.  These are detected by the deployment script and required for setup.
+- Install [Google SDK](https://cloud.google.com/sdk/) and add `gcloud` to `PATH`
+You must have an active Google Cloud Platform account.
+- Configure `gcloud` user, zone, and project
+These are detected by the deployment script and required for setup.
 
 
 `# gcloud config set account <user account>`
@@ -64,11 +82,14 @@ A second system will be the locally running Kubernetes cluster on which with Ser
 ### Step 1: Deploy Gluster-Kubernetes cluster in Google Compute Engine (GCE)
 This step sets up the **External Service Provider** portion of our topology (see [diagram](./docs/Service-Catalog-Published.png)).
 
-To kick off deployment, run `gk-cluster-deploy/deploy/cluster/gk-up.sh`.  The script has a number of configurable variables relative to GCE Instance settings.  They can be found in `deploy/cluster/lib/config.sh`  These can be overridden inline with `gk-up.sh` or as environment variables. To run the script with out pausing run`gk-up.sh -y`.
+To kick off deployment, run `gk-cluster-deploy/deploy/cluster/gk-up.sh`
+The script has a number of configurable variables relative to GCE Instance settings
+They can be found in `deploy/cluster/lib/config.sh`  These can be overridden inline with `gk-up.sh` or as environment variables. To run the script with out pausing run`gk-up.sh -y`.
 
-Runtime takes around 5 to 10 minutes.  Go get some coffee.
+Runtime takes around 5 to 10 minutes
+Go get some coffee.
 
-Alternatively, you can manually deploy the GCE portion by following [these instuctions](//TODO).  // TODO
+Alternatively, you can manually deploy the GCE portion by following [these instuctions](//TODO) // TODO
 
 When deployment completes, commands to ssh into the master node and the URL of the CNS Object Broker will be output. **Note the URL and PORT.**
 
@@ -78,7 +99,8 @@ This step sets up the **K8s Cluster** portion of our topology (see [diagram](./d
 *In a separate terminal:*
 1. Change directories to the `service-catalog` repository.
 
-2. Follow the [Service-Catalog Installation instructions](https://github.com/kubernetes-incubator/service-catalog/blob/master/docs/introduction.md#installation).  Once the Service-Catalog is deployed, return here.
+2. Follow the [Service-Catalog Installation instructions](https://github.com/kubernetes-incubator/service-catalog/blob/master/docs/introduction.md#installation)
+Once the Service-Catalog is deployed, return here.
 
 
 ## Using the Service Catalog
@@ -99,9 +121,11 @@ Change to the `cns-object-broker` directory created when cloning the repo.
 
 0. Retrieve the URL and PORT of the cns-object-broker.
 
-    If `gk-up.sh` was run, it will have been output at the end of the script.  
+    If `gk-up.sh` was run, it will have been output at the end of the script
 
-    To get the url and port manually, first note the **external ip** of any GCE node in the cluster.  The broker is exposed via a *NodePort Service* and so is reachable via any node.
+
+    To get the url and port manually, first note the **external ip** of any GCE node in the cluster
+    The broker is exposed via a *NodePort Service* and so is reachable via any node.
 
     `# gcloud compute instances list --filter="<user name>"`
 
@@ -114,7 +138,8 @@ Change to the `cns-object-broker` directory created when cloning the repo.
     broker-cns-object-broker-node-port   10.102.63.165   <nodes>       8080:32283/TCP   1d
     ```
 
-    The ports are formatted as \<InternalPort\>:\<ExternalPort\>.  Note the ExternalPort.
+    The ports are formatted as \<InternalPort\>:\<ExternalPort\>
+    Note the ExternalPort.
 
 1.  Edit *examples/service-catalog/service-broker.yaml*
 
@@ -161,7 +186,8 @@ Change to the `cns-object-broker` directory created when cloning the repo.
 
 2. Now create the *ServiceInstance*.
 
-    *Optional:* Set a custom bucket name.  If one is not provided, a random GUID is generated.  Edit *examples/service-catalog/service-instance.yaml*
+    *Optional:* Set a custom bucket name.  If one is not provided, a random GUID is generated
+    Edit *examples/service-catalog/service-instance.yaml*
 
     Snippet:
     ```yaml
@@ -199,7 +225,8 @@ Change to the `cns-object-broker` directory created when cloning the repo.
 
     `# kubectl --context=service-catalog -n test-ns get serviceinstancecredentials`
 
-    *ServiceInstanceCredentials* will result in a *Secret* being created in same Namespace.  Check for the secret:
+    *ServiceInstanceCredentials* will result in a *Secret* being created in same Namespace
+    Check for the secret:
 
     `# kubectl -n test-ns get secret cns-bucket-credentials`
 
