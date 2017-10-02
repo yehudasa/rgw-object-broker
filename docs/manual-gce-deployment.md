@@ -117,7 +117,7 @@ That script can be found [here](https://github.com/copejon/gk-cluster-deploy/blo
 
   - Move the binary to `bin` dir
 
-    `# mv $(find /tmp/ -name heketi-cli) /usr/bin/`
+    `# mv $(find ./ -name heketi-cli) /usr/bin/`
 
 6. Initialize the kubernetes master node.
 
@@ -145,11 +145,11 @@ That script can be found [here](https://github.com/copejon/gk-cluster-deploy/blo
 
     Note the token value for the next step.
 
-1. On **each** minion, execute the `kubeadm join`:
+1. On **each** minion, execute the `kubeadm join` command:
 
     `# kubeadm join --token <token> <master internal ip>:6443`
 
-    *Note: in `kubeadm join`, the option `--discovery-token-ca-cert-hash <ca cert token>` is optional.*
+    *Note: in `kubeadm join`, the option `--discovery-token-ca-cert-hash <ca cert token>` is not required.*
 
     Should output
     ```
@@ -173,7 +173,7 @@ That script can be found [here](https://github.com/copejon/gk-cluster-deploy/blo
     Run 'kubectl get nodes' on the master to see this machine join.
     ```
 
-2. Once all minions are attached, check their status on the *master* node
+2. Once all minions are attached, check their status on the **master** node
 
     `# kubectl get nodes`
 
@@ -199,10 +199,10 @@ That script can be found [here](https://github.com/copejon/gk-cluster-deploy/blo
 
     `# cp topology.json.sample topology.json`
 
-3. In the `topology.json`, each node must be identified by its *hostname* and *internal IP*.
+3. In `topology.json`, each node must be identified by its *hostname* and *internal IP*.
 The absolute path (e.g. `/dev/sdb`) of the additional raw block device must be provided under `devices`.
 
-    Define each `node` block to reference a minion in the cluster.  The topology file must have *at least* 3 nodes referenced.
+    Define each `node` block to reference a different minion in the cluster.  The topology file must have *at least* 3 nodes referenced.
     More can be added if there are more minions deployed.
 
     ```json
@@ -265,7 +265,6 @@ The absolute path (e.g. `/dev/sdb`) of the additional raw block device must be p
 
     ```
     NAME                                      TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)          AGE
-    gluster-s3-deployment                     NodePort    <cluster ip>     <none>        8080:32276/TCP   47m
     gluster-s3-service                        ClusterIP   <cluster ip>     <none>        8080/TCP         48m
     glusterfs-dynamic-gluster-s3-claim        ClusterIP   <cluster ip>     <none>        1/TCP            48m
     glusterfs-dynamic-gluster-s3-meta-claim   ClusterIP   <cluster ip>     <none>        1/TCP            48m
@@ -369,5 +368,7 @@ The absolute path (e.g. `/dev/sdb`) of the additional raw block device must be p
     svc/broker-cns-object-broker-node-port   NodePort    10.109.165.178   <none>        8080:31128/TCP   1m
     ```
 
-3.  Note the external port of *svc/broker-cns-object-broker-node-port*.  Under ports, the format is \<pod port\>:\<external port\>/TCP.
-This is required for the broker api object definition that we will create on the local *all-in-one* kubernetes cluster.
+3.  Note the external port of `svc/broker-cns-object-broker-node-port`.  Under ports, the format is `<pod port>:<external port>/TCP`.
+This is required for the service broker api object definition that we will create on the local *all-in-one* kubernetes cluster.
+
+**Return to the [Main Page](../README.md#step-2-deploy-the-service-catalog) to continue with the Service Catalog deployment.**

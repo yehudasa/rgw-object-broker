@@ -1,8 +1,9 @@
 # CNS Object Broker
-## Utilize Kubernetes Service-Catalog to dynamically provision CNS Object Storage.
 
 ## WARNING!
 The work in this project is a proof of concept and not intended production.
+
+## Utilize Kubernetes Service-Catalog to dynamically provision CNS Object Storage.
 
 ## Overview
 A core feature of the Kubernetes system is the ability to provision a diverse
@@ -72,7 +73,6 @@ Please refer to the [command flow diagram](docs/diagram/control-diag.md) for a m
 
 ## Setup
 
-**// TODO: define location for each set of instructions**
 ### Step 0: Preparing environment
 - Clone [Kubernetes](https://github.com/kubernetes)
 - Clone [Service-Catalog](https://github.com/kubernetes-incubator/service-catalog)
