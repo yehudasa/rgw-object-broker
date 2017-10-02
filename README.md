@@ -58,16 +58,21 @@ This results in an artificially flat bucket hierarchy.
 ### Topology
 There are two primary systems that make up this demonstration
 They are the Broker and its colocated CNS Object store.
-It should be noted that the Broker can be implemented to run anywhere
-They fill the role of our micro-service provider
+It should be noted that the Broker can be implemented to run anywhere.
+These components fill the role of our micro-service provider.
 It is only for the purpose of this demo that we decided deploy the Broker and the CNS Cluster in the same location
 
+- This system will consist of *at least* 4 GCE instances.  **Each minion instance MUST have an additional raw block device.**
 
 A second system will be the locally running Kubernetes cluster on which with Service-Catalog is deployed
 This cluster will be our micro-server client
 Please refer to the [command flow diagram](docs/diagram/control-diag.md) for a more in depth look at these systems.
 
+- This system will be run locally in a Kubernetes *all-in-one* cluster.
+
 ## Setup
+
+**// TODO: define location for each set of instructions**
 ### Step 0: Preparing environment
 - Clone [Kubernetes](https://github.com/kubernetes)
 - Clone [Service-Catalog](https://github.com/kubernetes-incubator/service-catalog)
@@ -89,12 +94,12 @@ This step sets up the **External Service Provider** portion of our topology (see
 
 To kick off deployment, run `gk-cluster-deploy/deploy/cluster/gk-up.sh`
 The script has a number of configurable variables relative to GCE Instance settings
-They can be found in `deploy/cluster/lib/config.sh`  These can be overridden inline with `gk-up.sh` or as environment variables. To run the script with out pausing run`gk-up.sh -y`.
+They can be found in `deploy/cluster/lib/config.sh`  These can be overridden inline with `gk-up.sh` or as environment variables. To skip configuration review, run`gk-up.sh -y`.
 
 Runtime takes around 5 to 10 minutes
 Go get some coffee.
 
-Alternatively, you can manually deploy the GCE portion by following [these instuctions](//TODO) // TODO
+Alternatively, you can manually deploy the GCE portion by following [these instuctions](docs/manual-gce-deployment.md)
 
 When deployment completes, commands to ssh into the master node and the URL of the CNS Object Broker will be output. **Note the URL and PORT.**
 
