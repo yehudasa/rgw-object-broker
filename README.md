@@ -10,23 +10,22 @@ A core feature of the Kubernetes system is the ability to provision a diverse
 offering of block and file storage on demand.
 This project seeks to demonstrate
 that by using the Kubernetes-Incubator's Service-Catalog, it is now also possible
-to bring this dynamic provisioning to S3 object storage.
-This broker is designed
+to bring dynamic provisioning to S3 object storage.
+The CNS Object Broker is designed
 to be used with [Gluster-Kubernetes](https://github.com/jarrpa/gluster-kubernetes).
 
-See our detailed [command flow diagram](docs/diagram/control-diag.md) for
- an overview of the system.
+Our [command flow diagram](docs/diagram/control-diag.md) shows where Kubernetes, service-catalog,
+and the (often external) service broker interact. Service-catalog terms used below are shown in the diagram.
 
 ### What It Does
-This broker implements OpenServiceBroker methods for creating, connecting to, and destroying
+This broker implements [OpenServiceBroker](https://github.com/openservicebrokerapi/servicebroker/blob/master/spec.md) methods for creating, connecting to, and destroying
 object buckets.
 - For each new Service Instance, a new, uniquely named bucket is created.
 - For each new Service Instance Credential, a Secret is generated with the
 coordinates and credentials of the Service Instance's associated bucket.
 - Deleting a Service Instance destroys the associated bucket.
-- Deleting a Service Instance Credential deletes the secret.
-Nothing is done on the broker side.
-This is because the broker does not perform any actions on Bind, so there is nothing to
+- Deleting a Service Instance Credential deletes the secret.  
+Because the broker does not perform any actions on Bind, there is nothing to
 undo.
 
 ### Limitations
@@ -34,11 +33,14 @@ undo.
 - Currently, the CNS Object Broker is dependent on GCE.  If run outside of a GCE environment, it will fail to start.  This is because the Broker detects the external IP of the node on which it is run.
 It pairs this IP with the port of the gluster-s3-deployment *Service* to generate the coordinaates returned in the *ServiceInstanceCredential*.  This is not a requirement of brokers in general.
 
-- As it is implemented, the CNS Object Broker must run on the same Kubernetes cluster as the gluster-s3-deployment.  This is because it uses a kube api client to get the gluser-s3-deployment's *Service* from which is parses it's external port. This is not a requirement of brokers in general.
+- As it is implemented, the CNS Object Broker must run on the same Kubernetes cluster as the gluster-s3-deployment because
+it accesses the *Service* that exposes its *NodePort*.  This is done through a kubernetes api client, which will fail if it cannot
+ reach the gluster-s3-deployment's *Service*. This is not a requirement of brokers in general.
 
 - Auth:  The S3 api implementation (Gluster-Swift) does not enforce any authentication / authorization.
-Each new bucket, regardless of the *Namespace* of its *ServiceInstance*, is accessible and mutable by anyone with the coordinates of the S3 server.
+Each new bucket, regardless of the *Namespace* of its *ServiceInstance*, is accessible and deletable by anyone with the coordinates of the S3 server.
 
+<!TODO: check minio allows '/' in naming>
 - Flat Bucket Hierarchy:  Gluster-Swift's S3 implementation allows for nested buckets.
 However, we have written the CNS Object Broker utilizing the minio-go S3 client, which has no concept of nested buckets.
 This results in an artificially flat bucket hierarchy.
@@ -101,10 +103,19 @@ Go get some coffee.
 
 Alternatively, you can manually deploy the GCE portion by following [these instuctions](docs/manual-gce-deployment.md)
 
-When deployment completes, commands to ssh into the master node and the URL of the CNS Object Broker will be output. **Note the URL and PORT.**
+When deployment completes, commands to ssh into the master node and the URL of the CNS Object Broker will be output. *Note the URL and PORT.*
 
-### Step 2: Deploy the Service-Catalog
+### Step 2: Deploy Kubernetes All-in-One Cluster
 This step sets up the **K8s Cluster** portion of our topology (see [diagram](docs/diagram/control-diag.md)).
+1. Change directories to the `kubernetes` repository.
+
+2. Create the cluster
+
+    `KUBE_ENABLE_CLUSTER_DNS=true ./hack/local-up-cluster.sh -O`
+
+    This will stream to stdout/stderr in the terminal until it is killed with `ctrl-c`.
+
+### Step 3: Deploy the Service-Catalog
 
 *In a separate terminal:*
 1. Change directories to the `service-catalog` repository.
@@ -185,7 +196,7 @@ Change to the `cns-object-broker` directory created when cloning the repo.
 
     `# kubectl create namespace test-ns`
 
-    *Note:* To change the *Namespace* name, edit *examples/service-catalog/service-instance.yaml*
+    **NOTE: To change the *Namespace*, edit examples/service-catalog/service-instance.yaml**
 
     Snippet:
     ```yaml
