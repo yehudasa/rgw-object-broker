@@ -30,7 +30,7 @@ undo.
 
 ### Limitations
 
-- Currently, the CNS Object Broker is dependent on GCE.  If run outside of a GCE environment, it will fail to start.  This is because the Broker detects the external IP of the node on which it is run.
+- Currently, the CNS Object Broker is dependent on GCE.  If run outside of a GCE environment, it will fail to start because the CNS Object Broker detects the external IP of the node on which it is run by calling to the GCP metadata server.
 It pairs this IP with the port of the gluster-s3-deployment *Service* to generate the coordinaates returned in the *ServiceInstanceCredential*.  This is not a requirement of brokers in general.
 
 - As it is implemented, the CNS Object Broker must run on the same Kubernetes cluster as the gluster-s3-deployment because

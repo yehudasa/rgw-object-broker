@@ -42,4 +42,53 @@ E.G.
 ## Package Structure
 
 The CNS Object Broker is composed of two components: the broker itself, and an http server.
-Both components are located under `cns-object-broker/pkg/`.
+Both components are located under `cns-object-broker/pkg/` in their respective packages.  
+The server receives REST calls and translates them into broker methods.  
+The server also returns broker json responses relative to the method called.
+For instance, a `CreateServiceInstanceRequest` has an accompanying `CreateServiceInstanceResponse`.
+
+## Testing a WIP CNS Object Broker image
+
+To test a broker built from a working branch, the tag must be known to helm.
+There are two ways to do this.
+
+**NOTE: It is not necessary to recreate any other component of the cluster.**
+
+
+### Option 1: Helm CLI
+
+Simply tear down the existing CNS Object Broker and install it again while invoking the `--set` helm option.
+
+```
+# helm delete --purge broker
+# helm install ./chart/ --set image=gcr.io/openshift-gce-devel/cns-obj-broker:<tag> --name broker --namespace broker
+```
+
+This method require that `--set` be invoked each time the CNS Object Broker is installed.
+
+## Option 2: Edit the Chart
+
+Open [chart/values.yaml](../chart/values.yaml) for editing.
+Change the `image` value to the image tag you would like to test.
+Here, the `image` would be assigned `gcr.io/openshift-gce-devel/cns-obj-broker:<commit hash>`
+
+```yaml
+# Default values for CNS Object Broker
+# Image to use.  Default is :v1.  
+# Specify
+#   --set image=gcr.io/openshift-gce-devel/cns-obj-broker:<tag>
+# with `helm install` to use a non-default version. Useful for running WIP images.
+image: gcr.io/openshift-gce-devel/cns-obj-broker:<image tag to test>
+# ImagePullPolicy; valid values are "IfNotPresent", "Never", and "Always"
+imagePullPolicy: Always
+```
+
+Once the desired image is defined, simply reinstall the broker with Helm.
+
+Delete a running broker:
+
+`# helm delete --purge broker`
+
+And install the broker:
+
+`# helm install ./chart/ --name broker --namespace=broker`
