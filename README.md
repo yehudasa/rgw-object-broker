@@ -17,6 +17,74 @@ to be used with [Gluster-Kubernetes](https://github.com/jarrpa/gluster-kubernete
 Our [command flow diagram](docs/diagram/control-diag.md) shows where Kubernetes, service-catalog,
 and the (often external) service broker interact. Service-catalog terms used below are shown in the diagram.
 
+### Nomenclature
+
+Before going further, it's useful to define common terms used throughout the entire system.
+The relationships between the different systems and objects can be seen in the [control flow diagram](docs/diagram/control-diag.md)
+There are a number of naming collisions which can lead to some confusion.
+
+#### External Service Provider
+
+- *External Service Provider*
+
+For our purposes, an External Service Provider is any system that uses a Service Broker to make Services available on demand.  
+The actual location of the External Service Provider is arbitrary.  
+It can be a remote service provider like AWS S3, an on premise cluster, or the same cluster as the Service-Catalog.
+
+The External Service Provider should consist of two components: the service broker and the actual services being served to clients.  In this example, the service component is a CNS Object Storage cluster with a Swift/S3 REST interface.
+
+- *Broker*
+
+The Broker binary is run inside a pod.  The broker implements a server that listens for REST requests and translates them to the underlying Broker methods.  When methods complete, they return OpenServiceBroker responses in json format.
+
+##### Broker Objects
+
+- *ServiceInstance*
+
+  Broker's internal representation of a provisioned service.
+
+- *ServiceInstanceCredential*
+
+  Broker's data structure for tracking coordinates and auth credentials for a single *ServiceInstance*.  
+
+- *Catalog*
+
+  A complete list of services and plans that are provisionable by the Broker.
+
+#### Local Kubernetes Cluster
+
+For this example, the Local Kubernetes Cluster is used to represent a cluster in which active development takes place.
+The Service-Catalog must be run here because it will be making Kubernetes API calls to create API objects for developers.
+
+##### Service-Catalog API Objects
+
+Here is where naming collisions become confusing.
+All of the terms in this section are objects of the Service Catalog API Server.
+The terms here only represent the actual services provisioned in the External Service Provider by the actual Broker.
+
+- *ServiceBroker*
+
+Service Catalog representation of the actual Broker, usually located elsewhere.
+The Service Catalog Controller Manager will use the URL provided within the *ServiceBroker* to connect to the actual Broker server.
+
+- *ServiceClass*
+
+Service Catalog representation of the *Catalog*.  When a *ServiceBroker* is created, the Service Catalog Controller Manager requests the *Catalog* from the actual Broker.  
+The response is a data structure in json format list all Services and Plans offered by the Broker.
+The Controller Manager processes this structure into a set of *ServiceClasses* in the API Server.
+
+**NOTE: There is no Catalog object in the Service Catalog.  It is represented as a set of ServiceClasses only!**
+
+- *ServiceInstance*
+
+Service Catalog representation of a provisioned Service Instance in the External Service Provider.
+
+- *ServiceInstanceCredential*
+
+Service Catalog object that does not contain any authentication or coordinate information.
+Instead, when a *ServiceInstanceCredential* is created in the Service Catalog API Server, it triggers a request to the Broker for authentication and coordinate information.
+Once a response is received, he sensitive information is stored in a *Secret* in the same namespace as the *ServiceInstanceCredential*.
+
 ### What It Does
 This broker implements [OpenServiceBroker](https://github.com/openservicebrokerapi/servicebroker/blob/master/spec.md) methods for creating, connecting to, and destroying
 object buckets.
