@@ -96,24 +96,22 @@ They are managed by the `SC-APISERVER` portion of the [control flow diagram](doc
 ### What It Does
 This broker implements [OpenServiceBroker](https://github.com/openservicebrokerapi/servicebroker/blob/master/spec.md) methods for creating, connecting to, and destroying
 object buckets.
-- For each new Service Instance, a new, uniquely named bucket is created.
-- For each new Service Instance Credential, a Secret is generated with the
-coordinates and credentials of the Service Instance's associated bucket.
-- Deleting a Service Instance destroys the associated bucket.
-- Deleting a Service Instance Credential deletes the secret.  
-Because the broker does not perform any actions on Bind, there is nothing to
-undo.
+- For each new *ServiceInstance*, a new, uniquely named bucket is created.
+- For each new *ServiceInstanceCredential*, a Secret is generated with the
+coordinates and credentials of the *ServiceInstance's* associated bucket.
+- Deleting a *ServiceInstance* destroys the associated bucket.
+- Deleting a *ServiceInstanceCredential* deletes the secret.
 
 ### Limitations
 
 - Currently, the CNS Object Broker is dependent on GCE.  If run outside of a GCE environment, it will fail to start because the CNS Object Broker detects the external IP of the node on which it is run by calling to the GCP metadata server.
-It pairs this IP with the port of the gluster-s3-deployment *Service* to generate the coordinaates returned in the *ServiceInstanceCredential*.  This is not a requirement of brokers in general.
+It pairs this IP with the port of the `gluster-s3-deployment` *Service* to generate the coordinaates returned in the *ServiceInstanceCredential*.  This is not a requirement of brokers in general.
 
-- As it is implemented, the CNS Object Broker must run on the same Kubernetes cluster as the gluster-s3-deployment because
+- As it is implemented, the CNS Object Broker must run on the same Kubernetes cluster as the `gluster-s3-deployment` because
 it accesses the *Service* that exposes its *NodePort*.  This is done through a kubernetes api client, which will fail if it cannot
- reach the gluster-s3-deployment's *Service*. This is not a requirement of brokers in general.
+ reach the `gluster-s3-deployment`'s *Service*. This is not a requirement of brokers in general.
 
-- Auth:  The S3 api implementation (Gluster-Swift) does not enforce any authentication / authorization.
+- Auth:  The S3 API implementation (Gluster-Swift) does not enforce any authentication / authorization.
 Each new bucket, regardless of the *Namespace* of its *ServiceInstance*, is accessible and deletable by anyone with the coordinates of the S3 server.
 
 <!TODO: check minio allows '/' in naming>
@@ -133,21 +131,22 @@ This results in an artificially flat bucket hierarchy.
 ### Assumptions
 - Gk-cluster-deploy was written and tested on Fedora 25 and RHEL 7.
 - A [Google Cloud Platform](https://cloud.google.com/compute/) account.
+- The following `gcloud config` variables are set:
+  1. `account`
+  2. `project`
+  3. `zone`
 
 ### Topology
-There are two primary systems that make up this demonstration
+There are two primary systems that make up this demonstration.
 They are the Broker and its colocated CNS Object store.
 It should be noted that the Broker can be implemented to run anywhere.
 These components fill the role of our micro-service provider.
-It is only for the purpose of this demo that we decided deploy the Broker and the CNS Cluster in the same location
+It is only for the purpose of this demo that we decided deploy the Broker and the CNS Cluster in the same location.
+This system will consist of *at least* 4 GCE instances.  **Each minion instance MUST have an additional raw block device.**
 
-- This system will consist of *at least* 4 GCE instances.  **Each minion instance MUST have an additional raw block device.**
-
-A second system will be the locally running Kubernetes cluster on which with Service-Catalog is deployed
-This cluster will be our micro-server client
+Our second system will be the locally running Kubernetes cluster on which with Service-Catalog is deployed.
+This system will be run locally in a Kubernetes *all-in-one* cluster and is where consumers of our storage service will be located.
 Please refer to the [command flow diagram](docs/diagram/control-diag.md) for a more in depth look at these systems.
-
-- This system will be run locally in a Kubernetes *all-in-one* cluster.
 
 ## Setup
 
@@ -156,30 +155,29 @@ Please refer to the [command flow diagram](docs/diagram/control-diag.md) for a m
 - Clone [Service-Catalog](https://github.com/kubernetes-incubator/service-catalog)
 - Install [Google SDK](https://cloud.google.com/sdk/) and add `gcloud` to `PATH`
 You must have an active Google Cloud Platform account.
-- Configure `gcloud` user, zone, and project
+- Configure `gcloud` account, zone, and project
 These are detected by the deployment script and required for setup.
 
+  `# gcloud config set account <user account>`
 
-`# gcloud config set account <user account>`
+  `# gcloud config set project <project>`
 
-`# gcloud config set project <project>`
-
-`# gcloud config set compute/zone <zone>`
+  `# gcloud config set compute/zone <zone>`
 
 
-### Step 1: Deploy Gluster-Kubernetes cluster in Google Compute Engine (GCE)
+### Step 1: Deploy Gluster-Kubernetes Cluster in Google Compute Engine (GCE)
 This step sets up the **External Service Provider** portion of our topology (see [diagram](docs/diagram/control-diag.md)).
 
-To kick off deployment, run `gk-cluster-deploy/deploy/cluster/gk-up.sh`
-The script has a number of configurable variables relative to GCE Instance settings
-They can be found in `deploy/cluster/lib/config.sh`  These can be overridden inline with `gk-up.sh` or as environment variables. To skip configuration review, run`gk-up.sh -y`.
+To kick off deployment, run `gk-cluster-deploy/gk-up.sh`
+The script has a number of configurable variables relative to GCE Instance settings.
+They can be found in `lib/config.sh`.
+These can be overridden inline with `gk-up.sh` or as environment variables. To skip configuration review, run `gk-up.sh -y`.
 
-Runtime takes around 5 to 10 minutes
-Go get some coffee.
+Runtime takes around 5 to 10 minutes.
 
-Alternatively, you can manually deploy the GCE portion by following [these instuctions](docs/manual-gce-deployment.md)
+**NOTE: You can manually deploy the GCE portion by following [these instuctions](docs/manual-gce-deployment.md)**
 
-When deployment completes, commands to ssh into the master node and the URL of the CNS Object Broker will be output. *Note the URL and PORT.*
+When deployment completes, the URL of the CNS Object Broker will be output. *Note the URL and PORT.*
 
 ### Step 2: Deploy Kubernetes All-in-One Cluster
 This step sets up the **K8s Cluster** portion of our topology (see [diagram](docs/diagram/control-diag.md)).
@@ -194,11 +192,10 @@ This step sets up the **K8s Cluster** portion of our topology (see [diagram](doc
 ### Step 3: Deploy the Service-Catalog
 
 *In a separate terminal:*
-1. Change directories to the `service-catalog` repository.
+1. Change directories to the `./kubernetes-incubator/service-catalog/` repository.
 
 2. Follow the [Service-Catalog Installation instructions](https://github.com/kubernetes-incubator/service-catalog/blob/master/docs/introduction.md#installation)
 Once the Service-Catalog is deployed, return here.
-
 
 ## Using the Service Catalog
 
@@ -206,9 +203,9 @@ Once the Service-Catalog is deployed, return here.
 
 - A 4 node Kube cluster in GCE, running:
   - Gluster-Kubernetes and its S3 components.
-  - Our CNS Object Broker.
+  - The CNS Object Broker.
 
-You can check the status of all these components at once by executing
+You can check the status of all these components at once by executing:
 
 `# gcloud compute ssh <master node name> --command="kubectl get pod,svc --all-namespaces"`
 
@@ -220,9 +217,8 @@ Change to the `cns-object-broker` directory created when cloning the repo.
 
     If `gk-up.sh` was run, it will have been output at the end of the script
 
-
-    To get the url and port manually, first note the **external ip** of any GCE node in the cluster
-    The broker is exposed via a *NodePort Service* and so is reachable via any node.
+    To get the url and port manually, first note the **external ip** of any GCE node in the cluster.
+    The broker is exposed via a *NodePort Service* and is reachable via any node.
 
     `# gcloud compute instances list --filter="<user name>"`
 
@@ -235,7 +231,7 @@ Change to the `cns-object-broker` directory created when cloning the repo.
     broker-cns-object-broker-node-port   10.102.63.165   <nodes>       8080:32283/TCP   1d
     ```
 
-    The ports are formatted as \<InternalPort\>:\<ExternalPort\>
+    The ports are formatted as \<InternalPort\>:\<ExternalPort\>.
     Note the ExternalPort.
 
 1.  Edit *examples/service-catalog/service-broker.yaml*
@@ -252,7 +248,7 @@ Change to the `cns-object-broker` directory created when cloning the repo.
 
 3. Verify the *ServiceBroker*.
 
-    If successful, the service-catalog controller will have generated a *ServiceClass* for the `cns-bucket-service`
+    If successful, the Service-Catalog controller manager will have generated a *ServiceClass* for the `cns-bucket-service`.
 
     `# kubectl --context=service-catalog get servicebroker,serviceclasses`
 
@@ -264,27 +260,27 @@ Change to the `cns-object-broker` directory created when cloning the repo.
     serviceclasses/cns-bucket-service   28s
     ```
 
-    If you do not see a *ServiceClass* object, see [Debugging](#debugging). //TODO
+    If you do not see a *ServiceClass* object, see [Debugging](#debugging).
 
 ### Create the *ServiceInstance* (API Object)
 
-1. *ServiceInstances* are Namespaced.  Before proceeding, the *Namespace* must be created.
+1. *ServiceInstances* are namespaced.  Before proceeding, the *Namespace* must be created.
 
     `# kubectl create namespace test-ns`
 
-    **NOTE: To change the *Namespace*, edit examples/service-catalog/service-instance.yaml**
+    **NOTE: To set your own *Namespace*, edit examples/service-catalog/service-instance.yaml**
 
     Snippet:
     ```yaml
     kind: ServiceInstance
     metadata:
-      namespace: test-ns  # Edit
+      namespace: test-ns  #Edit to set your own or use as is.
     ```
 
 2. Now create the *ServiceInstance*.
 
-    *Optional:* Set a custom bucket name.  If one is not provided, a random GUID is generated
-    Edit *examples/service-catalog/service-instance.yaml*
+    *Optional:* Set a custom bucket name.  If one is not provided, a random GUID is generated.
+    Edit *examples/service-catalog/service-instance.yaml*.
 
     Snippet:
     ```yaml
@@ -310,7 +306,7 @@ Change to the `cns-object-broker` directory created when cloning the repo.
         reason: ProvisionedSuccessfully
         message: The instance was provisioned successfully
     ```
-    If the *ServiceInstance* fails to create, see [Debugging](#debugging). //TODO
+    If the *ServiceInstance* fails to create, see [Debugging](#debugging).
 
 ### Create the *ServiceInstanceCredential* (API Object)
 
@@ -322,7 +318,7 @@ Change to the `cns-object-broker` directory created when cloning the repo.
 
     `# kubectl --context=service-catalog -n test-ns get serviceinstancecredentials`
 
-    *ServiceInstanceCredentials* will result in a *Secret* being created in same Namespace
+    *ServiceInstanceCredentials* will result in a *Secret* being created in same Namespace.
     Check for the secret:
 
     `# kubectl -n test-ns get secret cns-bucket-credentials`
@@ -334,7 +330,7 @@ Change to the `cns-object-broker` directory created when cloning the repo.
 
     If you want to verify the data was transmitted correctly, get the secret's yaml spec.
 
-    `#  kubectl -n test-ns get secret cns-bucket-credentials -o yaml`
+    `# kubectl -n test-ns get secret cns-bucket-credentials -o yaml`
 
     Snippet:
     ```yaml
@@ -349,7 +345,7 @@ Change to the `cns-object-broker` directory created when cloning the repo.
 
     Decode the data:
 
-    `echo "<value>"" | base64 -d`
+    `# echo "<value>"" | base64 -d`
 
 ## Debugging
 
@@ -358,26 +354,26 @@ Change to the `cns-object-broker` directory created when cloning the repo.
 To determine if the broker has encountered an error that may be impacting *ServiceInstance* creation,
 it can be useful to examine the broker's log.
 
-1. Access the Broker log by first sshing into the GCE cluster.
+1. Access the Broker log by first ssh-ing into the GCE cluster.
 
-    `gcloud compute ssh <master node name>`
+    `# gcloud compute ssh <master node name>`
 
 2. Get the unique name of the Broker *Pod*.
 
-    `kubectl get pods -n broker`
+    `# kubectl get pods -n broker`
 
 3. Using the Broker *Pod's* name, use `kubectl` to output the logs.
 
-    `kubectl -n broker logs -f <broker pod name>`
+    `# kubectl -n broker logs -f <broker pod name>`
 
 ####  Inspecting Service-Catalog API Objects
 
-Service-Catalog objects can return yaml or json formatted date just like core Kubernetes api objects.
-To output the data, the command is very similar:
+Service-Catalog objects can return yaml or json formatted data just like core Kubernetes api objects.
+To output the data, the command is:
 
-`kubectl --context=service-catalog get <service-catalog object>`
+`# kubectl --context=service-catalog get -o yaml <service-catalog object>`
 
-Where `<service-catalog object>` can be:
+Where `<service-catalog object>` is:
 - `servicebroker`
 - `serviceclass`
 - `serviceinstance`
@@ -389,10 +385,10 @@ Sometimes it's just quicker to tear it down and start again.  Thanks to Helm, th
 
 1. Tear down Service-Catalog
 
-    `helm delete --purge catalog`
+    `# helm delete --purge catalog`
 
 2. Deploy Service-Catalog
 
-    `helm install charts/catalog --name catalog --namespace catalog`
+    `# helm install charts/catalog --name catalog --namespace catalog`
 
 Once Service-Catalog has returned to a Running/Ready status, you can begin again by [creating a ServiceBroker object](#create-the-servicebroker-api-object).
