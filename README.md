@@ -19,7 +19,6 @@ Our [command flow diagram](docs/diagram/control-diag.md) shows where Kubernetes,
 and the (often external) service broker interact. Service-catalog terms used below are included in the diagram.
 
 
-
 ### Topology
 There are two separate environments that make up this demonstration.
 The first is a 4 node GCE cluster.  The CNS Object Broker and Gluster-Kubernetes are run here and represent the External Service Provider.
@@ -126,6 +125,8 @@ it accesses the *Service* that exposes its *NodePort*.  This is done through a k
 - Auth:  The S3 API implementation (Gluster-Swift) does not enforce any authentication / authorization.
 Each new bucket, regardless of the *Namespace* of its *ServiceInstance*, is accessible and deletable by anyone with the coordinates of the S3 server.
 
+---
+
 ## Installation
 
 ### Dependencies
@@ -193,6 +194,8 @@ This step sets up the **K8s Cluster** portion of our topology (see [diagram](doc
 
 2. Follow the [Service-Catalog Installation instructions](https://github.com/kubernetes-incubator/service-catalog/blob/master/docs/introduction.md#installation)
 Once the Service-Catalog is deployed, return here.
+
+---
 
 ## Using the Service Catalog
 
@@ -343,6 +346,8 @@ Change to the `cns-object-broker` directory created when cloning the repo.
     Decode the data:
 
     `# echo "<value>"" | base64 -d`
+
+---
 
 ## Debugging
 

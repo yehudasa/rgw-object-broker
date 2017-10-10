@@ -39,6 +39,8 @@ E.G.
 
 - `release`: Tags the image whose tag matches the current abbreviated git commit with `$(VERSION)` and pushes it to `$(REGSITRY)`
 
+---
+
 ## Package Structure
 
 The CNS Object Broker is composed of two components: the broker itself, and an http server.
@@ -46,6 +48,8 @@ Both components are located under `cns-object-broker/pkg/` in their respective p
 The server receives REST calls and translates them into broker methods.  
 The server also returns broker json responses relative to the method called.
 For instance, a `CreateServiceInstanceRequest` has an accompanying `CreateServiceInstanceResponse`.
+
+---
 
 ## Testing a WIP CNS Object Broker image
 
@@ -66,7 +70,7 @@ Simply tear down the existing CNS Object Broker and install it again while invok
 
 This method require that `--set` be invoked each time the CNS Object Broker is installed.
 
-## Option 2: Edit the Chart
+### Option 2: Edit the Chart
 
 Open [chart/values.yaml](../chart/values.yaml) for editing.
 Change the `image` value to the image tag you would like to test.
@@ -92,3 +96,9 @@ Delete a running broker:
 And install the broker:
 
 `# helm install ./chart/ --name broker --namespace=broker`
+
+### Debugging
+
+The CNS Object Broker log are accessible through `kubectl`.  Shell into the GCE cluster and execute:
+
+`# kubectl -n broker logs <broker pod>`

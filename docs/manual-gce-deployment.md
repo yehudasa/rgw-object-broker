@@ -27,6 +27,7 @@
   [`gluster-kubernetes`](https://github.com/gluster/gluster-kubernetes)
   [`heketi-cli`](https://github.com/heketi/heketi/releases/tag/v4.0.0)
 
+---
 
 ## Installation
 
@@ -186,6 +187,8 @@ If you do not want to deploy each node manually, you can run this script on each
     <minion3>            Ready                      <none>    1h        v1.8.0
     ```
 
+---
+
 ## Deploying Gluster-Kubernetes
 
 **NOTE: all actions in this section are performed on the master GCE node as `root`.**
@@ -286,6 +289,8 @@ The absolute path (e.g. `/dev/sdb`) of the additional raw block device must be p
     NAME                    TYPE       CLUSTER-IP       EXTERNAL-IP   PORT(S)                     AGE
     gluster-s3-deployment   NodePort   <cluster ip>     <none>        8080:<external port>/TCP    53m
     ```
+
+---
 
 ## Deploying the CNS Object Broker
 
