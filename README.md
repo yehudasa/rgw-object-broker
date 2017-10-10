@@ -6,18 +6,29 @@ The work in this project is a proof of concept and not intended for production.
 ## Utilize Kubernetes Service-Catalog to dynamically provision CNS Object Storage.
 
 ## Overview
-A core feature of the Kubernetes system is the ability to provision a diverse
-offering of block and file storage on demand.
-This project seeks to demonstrate
-that by using the Kubernetes-Incubator's [Service-Catalog](https://github.com/kubernetes-incubator/service-catalog),
-it is now also possible to bring dynamic provisioning to S3 object storage.
-This is accomplished with an application called a Broker that implements the [OpenServiceBroker](https://github.com/openservicebrokerapi/servicebroker/blob/master/spec.md) API spec.
-The Broker handles requests to create and destroy object buckets and returns information required to consume them.
+A core feature of the Kubernetes system is the ability to provision block and file storage on demand.
+This project seeks to demonstrate that by using the Kubernetes-Incubator's
+[Service-Catalog](https://github.com/kubernetes-incubator/service-catalog) and the CNS Object Broker,
+it is now possible to provision GlusterFS backed S3 buckets on demand.
+This is accomplished using [Gluster-Kubernetes](https://github.com/jarrpa/gluster-kubernetes), the Service-Catalog, and the CNS Object Broker.  Gluster-Kubernetes provides the S3 interface and backing storage. Service-Catalog enables communication between a client Kubernetes cluster and service provider. The CNS Object Broker is the endpoint to which the Service-Catalog sends requests for services.
 
+The CNS Object Broker handles requests to create and destroy S3 buckets and returns information required to consume them.
 The CNS Object Broker is designed
-to be used with [Gluster-Kubernetes](https://github.com/jarrpa/gluster-kubernetes).
+to be used only with [Gluster-Kubernetes](https://github.com/jarrpa/gluster-kubernetes).
 Our [command flow diagram](docs/diagram/control-diag.md) shows where Kubernetes, Service-Catalog,
 and the (often external) service broker interact. Service-catalog terms used below are included in the diagram.
+
+
+
+### Topology
+There are two separate environments that make up this demonstration.
+The first is a 4 node GCE cluster.  The CNS Object Broker and Gluster-Kubernetes are run here and represent the External Service Provider.
+It should be noted that the Broker can be implemented to run anywhere.
+This system will consist of *at least* 4 GCE instances.  **Each minion instance MUST have an additional raw block device.**
+
+Our second system will be the locally running Kubernetes cluster on which with Service-Catalog is deployed.
+This system will be run locally in a Kubernetes *all-in-one* cluster and is where consumers of our storage service will be located.
+Please refer to the [command flow diagram](docs/diagram/control-diag.md) for a more in depth look at these systems.
 
 ### Nomenclature
 
@@ -29,22 +40,23 @@ There are a number of naming collisions which can lead to some confusion.
 
 - *External Service Provider*
 
-For our purposes, an External Service Provider is any system that uses a Service Broker to make Services available on demand. The actual location of the External Service Provider is arbitrary.
-It can be a remote service provider like AWS S3, an on premise cluster, or colocated with the Service-Catalog.
+  For our purposes, an External Service Provider is any system that offers services on demand via the [Open Service Broker](https://github.com/openservicebrokerapi/servicebroker). The actual location of the External Service Provider is arbitrary.
+  It can be a remote service provider like AWS S3, an on premise cluster, or colocated with the Service-Catalog.
 
-The External Service Provider should consist of two components: the service broker and the actual services being consumed by clients.  In this example, the service component is a CNS Object Storage cluster with a Swift/S3 REST API.
+  The External Service Provider should consist of two components: the service broker and the actual services being consumed by clients.  In this example, the service component is a CNS Object Storage cluster with a Swift/S3 REST API.
 
 - *Broker*
 
-The Broker binary is run inside a pod.  The broker implements a server that listens for REST requests and translates them to the underlying Broker methods.  When methods complete, they return OpenServiceBroker responses in json format.
+  The broker presents a REST API which implements the [Open Service Broker](https://github.com/openservicebrokerapi/servicebroker) for http routes.
+  It functions as the endpoint to which the Service-Catalog communicates all requests for service operations.
 
-##### Broker Objects
+##### CNS Broker Objects
 
 - *ServiceInstance*
 
   A Broker's internal representation of a provisioned service.
 
-- *ServiceInstanceCredential*
+- *Credential*
 
   A Broker's data structure for tracking coordinates and auth credentials for a single *ServiceInstance*.  
 
@@ -52,10 +64,10 @@ The Broker binary is run inside a pod.  The broker implements a server that list
 
   A complete list of services and plans that are provisionable by the Broker.
 
-#### Local Kubernetes Cluster
+#### K8s Cluster
 
-For this example, the Local Kubernetes Cluster is used to represent a cluster in which active development takes place.
-The Service-Catalog must be run here because it will be making Kubernetes API calls to create API objects for developers.
+For this example, the local Kubernetes cluster is used to represent a development environment.
+The Service-Catalog is expected to be run in the development cluster because, in addition to Service-Catalog API objects, it is responsible for creating core Kubernetes objects (e.g. Secrets), in the namespaces of service consumers.
 
 ##### Service-Catalog API Objects
 
@@ -77,13 +89,13 @@ They are managed by the `SC-APISERVER` portion of the [control flow diagram](doc
   Service Catalog representation of a *Catalog* offering.  When a *ServiceBroker* is created, the Service Catalog Controller Manager requests the *Catalog* from the actual Broker.
   The response is a json object listing all Services and Plans offered by the Broker.
   The Controller Manager processes this response into a set of *ServiceClasses* in the API Server.
-  In this case, our *ServiceClass* is a provisionable object bucket.
+  In this case, our *ServiceClass* is a provisionable S3 bucket.
   A *ServiceClass* can provision many *ServiceInstances* of its class.
 
 - *ServiceInstance*
 
   Service Catalog representation of a consumable service instance in the External Service Provider.
-  In this case, a single object bucket.
+  In this case, a single S3 bucket.
   A *ServiceInstance* can have many *ServiceInstanceCredentials*, so long as the service supports this.
   This enables a single instance to be consumed by many Pods.
 
@@ -93,9 +105,9 @@ They are managed by the `SC-APISERVER` portion of the [control flow diagram](doc
   Instead, when a *ServiceInstanceCredential* is created in the Service Catalog API Server, it triggers a request to the Broker for authentication and coordinate information.
   Once a response is received, the sensitive information is stored in a *Secret* in the same namespace as the *ServiceInstanceCredential*.
 
-### What It Does
-This broker implements [OpenServiceBroker](https://github.com/openservicebrokerapi/servicebroker/blob/master/spec.md) methods for creating, connecting to, and destroying
-object buckets.
+### What the CNS Object Broker Does
+This broker implements [Open Service Broker](https://github.com/openservicebrokerapi/servicebroker/blob/master/spec.md) methods for creating, connecting to, and destroying
+S3 buckets.
 - For each new *ServiceInstance*, a new, uniquely named bucket is created.
 - For each new *ServiceInstanceCredential*, a Secret is generated with the
 coordinates and credentials of the *ServiceInstance's* associated bucket.
@@ -114,11 +126,6 @@ it accesses the *Service* that exposes its *NodePort*.  This is done through a k
 - Auth:  The S3 API implementation (Gluster-Swift) does not enforce any authentication / authorization.
 Each new bucket, regardless of the *Namespace* of its *ServiceInstance*, is accessible and deletable by anyone with the coordinates of the S3 server.
 
-<!TODO: check minio allows '/' in naming>
-- Flat Bucket Hierarchy:  Gluster-Swift's S3 implementation allows for nested buckets.
-However, we have written the CNS Object Broker utilizing the minio-go S3 client, which has no concept of nested buckets.
-This results in an artificially flat bucket hierarchy.
-
 ## Installation
 
 ### Dependencies
@@ -136,19 +143,9 @@ This results in an artificially flat bucket hierarchy.
   2. `project`
   3. `zone`
 
-### Topology
-There are two primary systems that make up this demonstration.
-They are the Broker and its colocated CNS Object store.
-It should be noted that the Broker can be implemented to run anywhere.
-These components fill the role of our micro-service provider.
-It is only for the purpose of this demo that we decided deploy the Broker and the CNS Cluster in the same location.
-This system will consist of *at least* 4 GCE instances.  **Each minion instance MUST have an additional raw block device.**
-
-Our second system will be the locally running Kubernetes cluster on which with Service-Catalog is deployed.
-This system will be run locally in a Kubernetes *all-in-one* cluster and is where consumers of our storage service will be located.
-Please refer to the [command flow diagram](docs/diagram/control-diag.md) for a more in depth look at these systems.
-
 ## Setup
+
+**NOTE: The following steps are performed from the local machine or VM unless stated otherwise.**
 
 ### Step 0: Preparing environment
 - Clone [Kubernetes](https://github.com/kubernetes)
