@@ -1,5 +1,5 @@
-# Default values for User-Provided Service Broker
-# Image to use.  Default is :latest.  
+# Default values for CNS Object Broker
+# Image to use.  Default is :v1.
 # Specify
 #   --set image=gcr.io/openshift-gce-devel/cns-obj-broker:<tag> 
 # with `helm install` to use a non-default version. Useful for running WIP images.
