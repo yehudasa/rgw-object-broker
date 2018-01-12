@@ -1,0 +1,8 @@
+apiVersion: servicecatalog.k8s.io/v1beta1
+kind: ServiceBinding
+metadata:
+  name: cns-bucket-credentials
+  namespace: test-ns
+spec:
+  instanceRef:
+    name: cns-bucket-instance
