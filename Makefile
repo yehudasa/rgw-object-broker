@@ -3,11 +3,13 @@ BIN_DIR=$(REPO_ROOT)/bin
 BIN_TARGET=cns-obj-broker
 PKG_DIR=$(REPO_ROOT)/main
 BUILD_DIR=$(REPO_ROOT)/build
+BUILD_COUNT_FILE=.build
 
 # DOCKER TAG VARS
-REGISTRY=gcr.io/openshift-gce-devel
+REGISTRY=localhost:5000
+# gcr.io/openshift-gce-devel
 IMAGE=cns-obj-broker
-DIRTY_HASH=$(shell git describe --always --abbrev=7 --dirty)
+DIRTY_HASH=$(shell git describe --always --abbrev=7 --dirty)-$(shell cat $(BUILD_COUNT_FILE))
 VERSION=v1
 
 .PHONY: broker image release push clean
@@ -26,10 +28,14 @@ image: $(BUILD_DIR)/Dockerfile
 	cp $(BUILD_DIR)/Dockerfile $(TEMP_BUILD_DIR)
 	docker build -t $(IMAGE) $(TEMP_BUILD_DIR)
 	docker tag $(IMAGE) $(REGISTRY)/$(IMAGE):$(DIRTY_HASH)
+	# docker tag $(IMAGE) $(REGISTRY)/$(IMAGE):v1
 	rm -rf $(TEMP_BUILD_DIR)
 
+values: $(BUILD_COUNT_FILE) chart/values.yaml
+	$(shell cat chart/values.yaml.template | sed s/{release}/$(DIRTY_HASH)/g > chart/values.yaml)
+
 # push IMAGE:$(DIRTY_HASH). Intended to push broker built from non-master / working branch.
-push:
+push: broker image values
 	gcloud docker -- push $(REGISTRY)/$(IMAGE):$(DIRTY_HASH)
 	@echo ""
 	@echo "-- Pushed image:"

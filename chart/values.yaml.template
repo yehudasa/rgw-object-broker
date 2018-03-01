@@ -3,6 +3,6 @@
 # Specify
 #   --set image=gcr.io/openshift-gce-devel/cns-obj-broker:<tag> 
 # with `helm install` to use a non-default version. Useful for running WIP images.
-image: localhost:5000/cns-obj-broker:a18ae9c-dirty-22
+image: localhost:5000/cns-obj-broker:{release}
 # ImagePullPolicy; valid values are "IfNotPresent", "Never", and "Always"
 imagePullPolicy: Always

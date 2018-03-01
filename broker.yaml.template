@@ -3,4 +3,4 @@ kind: ClusterServiceBroker
 metadata:
   name: cns-bucket-broker
 spec:
-  url: http://192.168.39.196:32283
+  url: http://192.168.39.196:{port}
