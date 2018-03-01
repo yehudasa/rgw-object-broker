@@ -62,19 +62,16 @@ type broker struct {
 
 // Initialize the s3-gluster service broker. This function is called by `server.Start()`.
 func CreateBroker() Broker {
-	const S3_BROKER_POD_LABEL = "glusterfs=s3-pod"
 	var instanceMap = make(map[string]*s3ServiceInstance)
-	glog.Info("Generating new s3-gluster broker.")
-	s3ip, err := getExternalIP()
-	if err != nil {
-		glog.Fatalf("Failed to get external IP: %v", err)
-	}
+	glog.Info("Generating new s3 broker.")
 
 	// get the kubernetes client
 	cs, err := getKubeClient()
 	if err != nil {
 		glog.Fatalf("failed to get kubernetes client: %v\n", err)
 	}
+
+        /*
 
 	// Get the s3 deployment pod created via the `gk-deploy` script. Need to
 	// get this pod using label selectors since its name is generated.
@@ -107,26 +104,29 @@ func CreateBroker() Broker {
 	svc, err := cs.Services(ns).Get(svcName, metav1.GetOptions{})
 	if err != nil {
 		glog.Fatalf("failed to get s3 service %q: %v\n", svcName, err)
-	}
-	s3Port := svc.Spec.Ports[0].NodePort // int
+	} */
+        s3ip := "10.17.112.2"
+	s3Port := 8000
+        user := "AR04WP16QTGI9C5IQ4BX"
+        pass := "0ZPTti4DLES2NDJ6qkemWZsHcasmA2xkNfyqrKgN"
 
 	// get the s3 client
 	s3endpoint := fmt.Sprintf("%s:%d", s3ip, s3Port)
-	s3c, err := getS3Client(acct, user, pass, s3endpoint)
+	s3c, err := getS3Client(user, pass, s3endpoint)
 	if err != nil {
 		glog.Fatalf("failed to get minio-s3 client: %v\n", err)
 	}
-	glog.Infof("New Broker for s3-gluster endpoint: %s", s3endpoint)
+
+	glog.Infof("New Broker for s3 endpoint: %s", s3endpoint)
 	return &broker{
 		instanceMap: instanceMap,
 		s3Client:    s3c,
 		s3url:       s3endpoint,
 		kubeClient:  cs,
-		s3ID:        fmt.Sprintf("%s:%s", acct, user),
+		s3ID:        user,
 		s3Pass:      pass,
 	}
 }
-
 // Implements the `Catalog` interface method.
 func (b *broker) Catalog() (*brokerapi.Catalog, error) {
 	return &brokerapi.Catalog{
@@ -285,12 +285,11 @@ func (b *broker) checkBucketExists(bucketName string) (bool, error) {
 }
 
 // Returns a minio api client.
-func getS3Client(acct, user, pass, ip string) (*minio.Client, error) {
-	glog.Infof("Creating s3 client based on: \"%s:%s\" on ip %s", acct, user, ip)
+func getS3Client(user, pass, ip string) (*minio.Client, error) {
+	glog.Infof("Creating s3 client based on: \"%s\" on ip %s", user, ip)
 
-	id := fmt.Sprintf("%s:%s", acct, user)
 	useSSL := false
-	minioClient, err := minio.NewV2(ip, id, pass, useSSL)
+	minioClient, err := minio.NewV2(ip, user, pass, useSSL)
 	if err != nil {
 		return nil, fmt.Errorf("Unable to create minio S3 client: %v", err)
 	}
