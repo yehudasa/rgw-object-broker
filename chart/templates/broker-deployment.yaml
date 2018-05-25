@@ -45,3 +45,10 @@ spec:
           periodSeconds: 10
           successThreshold: 1
           timeoutSeconds: 2
+        env:
+        - name: S3_ENDPOINT
+          value: {{ .Values.S3Endpoint }}
+        - name: S3_ACCESS_KEY
+          value: {{ .Values.S3AccessKey }}
+        - name: S3_SECRET
+          value: {{ .Values.S3Secret }}

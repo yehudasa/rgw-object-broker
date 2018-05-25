@@ -3,6 +3,11 @@
 # Specify
 #   --set image=gcr.io/openshift-gce-devel/cns-obj-broker:<tag> 
 # with `helm install` to use a non-default version. Useful for running WIP images.
-image: localhost:5000/cns-obj-broker:{release}
+image: {registry}/cns-obj-broker:{release}
 # ImagePullPolicy; valid values are "IfNotPresent", "Never", and "Always"
 imagePullPolicy: Always
+
+# Endpoint related secrets should be here
+S3Endpoint: http://10.17.112.2:8000
+S3AccessKey: KWB4HK2NTY4D0YR7
+S3Secret: Fjg7ACac4uCVhxZcFkOeJofXUM7tXdQW

@@ -7,4 +7,4 @@ spec:
   clusterServiceClassExternalName: cns-bucket-service
   clusterServicePlanExternalName: default
   parameters:
-    bucketName: "bucky" # Optional
+    # bucketName: "bucky" # Optional

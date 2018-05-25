@@ -6,18 +6,19 @@ BUILD_DIR=$(REPO_ROOT)/build
 BUILD_COUNT_FILE=.build
 
 # DOCKER TAG VARS
-REGISTRY=localhost:5000
+REGISTRY=172.17.8.1:5000
 # gcr.io/openshift-gce-devel
 IMAGE=cns-obj-broker
 DIRTY_HASH=$(shell git describe --always --abbrev=7 --dirty)-$(shell cat $(BUILD_COUNT_FILE))
 VERSION=v1
 
 .PHONY: broker image release push clean
-all: clean broker image 
+all: broker image 
 
 # Compile broker binary
 broker: $(BIN_DIR)/$(BIN_TARGET)
-$(BIN_DIR)/$(BIN_TARGET): $(PKG_DIR)/main.go
+
+$(BIN_DIR)/$(BIN_TARGET): $(PKG_DIR)/main.go pkg/broker/broker.go
 	go build -i -o $(BIN_DIR)/$(BIN_TARGET) $(PKG_DIR)/main.go
 
 # build the broker image
@@ -32,11 +33,12 @@ image: $(BUILD_DIR)/Dockerfile
 	rm -rf $(TEMP_BUILD_DIR)
 
 values: $(BUILD_COUNT_FILE) chart/values.yaml
-	$(shell cat chart/values.yaml.template | sed s/{release}/$(DIRTY_HASH)/g > chart/values.yaml)
+	$(shell cat chart/values.yaml.template | sed s/{release}/$(DIRTY_HASH)/g | sed s/{registry}/$(REGISTRY)/g > chart/values.yaml)
 
 # push IMAGE:$(DIRTY_HASH). Intended to push broker built from non-master / working branch.
 push: broker image values
-	gcloud docker -- push $(REGISTRY)/$(IMAGE):$(DIRTY_HASH)
+	# gcloud docker -- push $(REGISTRY)/$(IMAGE):$(DIRTY_HASH)
+	docker push $(REGISTRY)/$(IMAGE):$(DIRTY_HASH)
 	@echo ""
 	@echo "-- Pushed image:"
 	@echo ""
@@ -58,7 +60,8 @@ ifneq ($(shell git rev-list origin/master..HEAD --count), 0)
 	$(error HEAD is ahead of origin/master --  $(shell git status -sb --porcelain))
 endif
 	docker tag $(IMAGE) $(REGISTRY)/$(IMAGE):$(VERSION)
-	gcloud docker -- push $(REGISTRY)/$(IMAGE)
+	# gcloud docker -- push $(REGISTRY)/$(IMAGE)
+	docker push $(REGISTRY)/$(IMAGE)
 
 clean:
 	rm -rf $(BIN_DIR)/*

@@ -18,15 +18,17 @@ package broker
 
 import (
 	"fmt"
+	"os"
+	"strings"
 	"github.com/golang/glog"
 	"github.com/rs/xid"
-	"io/ioutil"
-	"net/http"
+	// "io/ioutil"
+	// "net/http"
 	"sync"
 
 	"github.com/kubernetes-incubator/service-catalog/pkg/brokerapi"
 	"github.com/minio/minio-go"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+        // metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientset "k8s.io/client-go/kubernetes"
 	k8sRest "k8s.io/client-go/rest"
 )
@@ -71,47 +73,21 @@ func CreateBroker() Broker {
 		glog.Fatalf("failed to get kubernetes client: %v\n", err)
 	}
 
-        /*
+        s3endpoint, user, pass := "", "", ""
 
-	// Get the s3 deployment pod created via the `gk-deploy` script. Need to
-	// get this pod using label selectors since its name is generated.
-	ns := "default"
-	podList, err := cs.CoreV1().Pods(ns).List(metav1.ListOptions{
-		LabelSelector: S3_BROKER_POD_LABEL,
-	})
-	if err != nil || len(podList.Items) != 1 {
-		glog.Fatalf("failed to get s3-deploy pod via label %q: %v\n", S3_BROKER_POD_LABEL, err)
-	}
-	s3Pod := podList.Items[0]
-
-	// get user, account and password from s3 pod (supplied to the `gk-deloy` script)
-	acct, user, pass := "", "", ""
-	for _, pair := range s3Pod.Spec.Containers[0].Env {
-		switch pair.Name {
-		case "S3_ACCOUNT":
-			acct = pair.Value
-		case "S3_USER":
-			user = pair.Value
-		case "S3_PASSWORD":
-			pass = pair.Value
-		default:
-			glog.Fatalf("unexpected env key %q for s3-deploy pod %q\n", pair.Name, s3Pod.Name)
+        for _, e := range os.Environ() {
+                pair := strings.Split(e, "=")
+                switch pair[0] {
+		case "S3_ENDPOINT":
+                        s3endpoint = pair[1]
+		case "S3_ACCESS_KEY":
+                        user = pair[1]
+		case "S3_SECRET":
+                        pass = pair[1]
 		}
-	}
-
-	// get s3 deployment service in order to get the s3 broker's external port
-	svcName := "gluster-s3-deployment"
-	svc, err := cs.Services(ns).Get(svcName, metav1.GetOptions{})
-	if err != nil {
-		glog.Fatalf("failed to get s3 service %q: %v\n", svcName, err)
-	} */
-        s3ip := "10.17.112.2"
-	s3Port := 8000
-        user := "AR04WP16QTGI9C5IQ4BX"
-        pass := "0ZPTti4DLES2NDJ6qkemWZsHcasmA2xkNfyqrKgN"
+        }
 
 	// get the s3 client
-	s3endpoint := fmt.Sprintf("%s:%d", s3ip, s3Port)
 	s3c, err := getS3Client(user, pass, s3endpoint)
 	if err != nil {
 		glog.Fatalf("failed to get minio-s3 client: %v\n", err)
@@ -285,13 +261,25 @@ func (b *broker) checkBucketExists(bucketName string) (bool, error) {
 }
 
 // Returns a minio api client.
-func getS3Client(user, pass, ip string) (*minio.Client, error) {
-	glog.Infof("Creating s3 client based on: \"%s\" on ip %s", user, ip)
+func getS3Client(user, pass, endpoint string) (*minio.Client, error) {
+	glog.Infof("Creating s3 client based on: \"%s\" on endpoint %s", user, endpoint)
 
-	useSSL := false
-	minioClient, err := minio.NewV2(ip, user, pass, useSSL)
+        addr := endpoint
+        useSSL := false
+
+        pair := strings.Split(endpoint, "://")
+
+        if len(pair) > 1 {
+	        useSSL = (pair[0] == "https")
+                addr = pair[1]
+
+        }
+
+        glog.Infof("  addr=%s (ssl=%t)", addr, useSSL)
+
+	minioClient, err := minio.NewV2(addr, user, pass, useSSL)
 	if err != nil {
-		return nil, fmt.Errorf("Unable to create minio S3 client: %v", err)
+		return nil, fmt.Errorf("Unable to create S3 client instance: %v", err)
 	}
 	return minioClient, nil
 }
@@ -308,27 +296,3 @@ func getKubeClient() (*clientset.Clientset, error) {
 	return cs, err
 }
 
-// Returns the external ip of the gce master node.
-func getExternalIP() (string, error) {
-	c := http.Client{}
-	glog.Info("Requesting external IP.")
-	req, err := http.NewRequest("GET", "http://metadata/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip", nil)
-	if err != nil {
-		glog.Errorf("Failed to create new http request: %v", err)
-		return "", err
-	}
-	req.Header.Add("Metadata-Flavor", " Google")
-	resp, err := c.Do(req)
-	if err != nil {
-		glog.Errorf("Failed to send http request: %v", err)
-		return "", err
-	}
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		glog.Errorf("Failed to decode http response body: %v", err)
-		return "", err
-	}
-	glog.Infof("Got external ip: %v", string(body))
-	return string(body), nil
-}
