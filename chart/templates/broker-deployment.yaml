@@ -52,3 +52,7 @@ spec:
           value: {{ .Values.S3AccessKey }}
         - name: S3_SECRET
           value: {{ .Values.S3Secret }}
+        - name: RGW_UID_PREFIX
+          value: {{ .Values.RGWUIDPrefix }}
+        - name: RGW_GC_USER
+          value: {{ .Values.RGWGCUser }}

@@ -97,8 +97,9 @@ type broker struct {
 
         rgw         RGWClient
 
-	// s3 server ip and port
 	uidPrefix   string
+	gcUser      string
+
 	// client used to access kubernetes
 	kubeClient  *clientset.Clientset
 }
@@ -118,10 +119,12 @@ func CreateBroker() Broker {
 	cs, err := getKubeClient()
 	if err != nil {
 		glog.Fatalf("failed to get kubernetes client: %v\n", err)
+                return nil
 	}
 
         client := RGWClient{}
         uidPrefix := "kube-rgw."
+        gcUser := ""
 
         for _, e := range os.Environ() {
                 pair := strings.Split(e, "=")
@@ -134,6 +137,8 @@ func CreateBroker() Broker {
                         client.user.secret = pair[1]
 		case "RGW_UID_PREFIX":
                         uidPrefix = pair[1]
+		case "RGW_GC_USER":
+                        gcUser = pair[1]
 		}
         }
 
@@ -143,12 +148,22 @@ func CreateBroker() Broker {
 		glog.Fatalf("failed to get s3 client: %v\n", err)
 	}
 
+        if gcUser == "" {
+                gcUser = "rgw-kube-gc-user"
+                _, err := client.provisionUser(gcUser, "rgw-broker-gc-" + gcUser, true)
+                if err != nil {
+                        glog.Fatalf("failed to create a user for broker gc: %v\n", err)
+                        return nil
+                }
+        }
+
 	glog.Infof("New Broker for s3 endpoint: %s", client.endpoint)
 	return &broker{
 		instanceMap: instanceMap,
 		rgw:         client,
 		kubeClient:  cs,
 		uidPrefix:   uidPrefix,
+                gcUser:      gcUser,
 	}
 }
 // Implements the `Catalog` interface method.
@@ -204,7 +219,7 @@ func (b *broker) CreateServiceInstance(instanceID string, req *brokerapi.CreateS
         userName := b.uidPrefix + xid.New().String()
 
         // First create a new user
-        newUser, err := b.provisionUser(userName, instanceID)
+        newUser, err := b.rgw.provisionUser(userName, "rgw-broker-instance-" + instanceID, false)
         if err != nil {
                 return nil, err
         }
@@ -244,18 +259,31 @@ func (b *broker) RemoveServiceInstance(instanceID, serviceID, planID string, acc
 		glog.Errorf("InstanceID %q not found.", instanceID)
 		return nil, fmt.Errorf("Broker cannot find instanceID %q.", instanceID)
 	}
+	userName := instance.Credential[USER_NAME].(string)
 	bucketName := instance.Credential[BUCKET_NAME].(string)
-	exists, err := b.checkBucketExists(bucketName)
+
+        err := b.rgw.suspendUser(instance.Credential[USER_NAME].(string))
 	if err != nil {
-		return nil, fmt.Errorf("Error checking if bucket exists: %v", err)
+		glog.Errorf("Error failed to suspend user: %v", err)
+		return nil, fmt.Errorf("Error failed to suspend user: %v", err)
 	}
-	if exists {
-		glog.Infof("Removing bucket %q", bucketName)
-		if err := b.rgw.client.RemoveBucket(bucketName); err != nil {
-			glog.Errorf("Error during RemoveBucket: %v", err)
-			return nil, fmt.Errorf("S3 Client errored while removing bucket: %v", err)
-		}
-	}
+
+        bucketId, err := b.rgw.getBucketId(bucketName)
+        if err != nil {
+                return nil, fmt.Errorf("Error failed to retrieve bucket id for bucket %q: %v", bucketName, err)
+        }
+	glog.Infof("bucketId: %s", bucketId)
+
+        err = b.rgw.unlinkBucket(userName, bucketName)
+        if err != nil {
+                return nil, fmt.Errorf("Error failed to unlink bucket %s/%s: %v", userName, bucketName, err)
+        }
+
+        err = b.rgw.linkBucket(b.gcUser, bucketName, bucketId)
+        if err != nil {
+                return nil, fmt.Errorf("Error failed to unlink bucket %s/%s: %v", userName, bucketName, err)
+        }
+
 	delete(b.instanceMap, BUCKET_NAME)
 	glog.Infof("Remove bucket %q succeeded.", bucketName)
 	return nil, nil
@@ -286,13 +314,13 @@ func (b *broker) UnBind(instanceID, bindingID, serviceID, planID string) error {
 	return nil
 }
 
-func (b *broker) rgwAdminRequest(method, section string, params url.Values) ([]byte, error) {
+func (rgw *RGWClient) rgwAdminRequestRaw(method, section string, params url.Values) (*http.Response, error) {
 	httpClient := &http.Client{
 		Timeout:   30 * time.Second,
 		Transport: http.DefaultTransport,
 	}
 
-        req_url := b.rgw.endpoint + "/admin/" + section + "?" + params.Encode()
+        req_url := rgw.endpoint + "/admin/" + section + "?" + params.Encode()
         glog.Infof("sending http request: %s", req_url)
 
 	req, err := http.NewRequest(method, req_url, bytes.NewReader(nil))
@@ -301,7 +329,7 @@ func (b *broker) rgwAdminRequest(method, section string, params url.Values) ([]b
 		return nil, fmt.Errorf("Error creating http request params=%v", params)
 	}
 
-        req = s3signer.SignV4(*req, b.rgw.user.accessKey, b.rgw.user.secret, "", "")
+        req = s3signer.SignV4(*req, rgw.user.accessKey, rgw.user.secret, "", "")
 	if req.Header.Get("Authorization") == "" {
 		glog.Errorf("Error signing request: Authorization header is missing")
 		return nil, fmt.Errorf("Error signing request: Authorization header is missing")
@@ -312,6 +340,15 @@ func (b *broker) rgwAdminRequest(method, section string, params url.Values) ([]b
 		glog.Errorf("Error sending http request: %v", err)
 		return nil, fmt.Errorf("httpClient.Do err: %v", err)
 	}
+
+        return resp, nil
+}
+
+func (rgw *RGWClient) rgwAdminRequest(method, section string, params url.Values) ([]byte, error) {
+        resp, err := rgw.rgwAdminRequestRaw(method, section, params)
+        if err != nil {
+                return nil, err
+        }
 
         defer resp.Body.Close()
 
@@ -330,25 +367,30 @@ func (b *broker) rgwAdminRequest(method, section string, params url.Values) ([]b
 }
 
 
-func (b *broker) provisionUser(userName, bindingID string) (*RGWUser, error) {
+func (rgw *RGWClient) provisionUser(userName, displayName string, successIfExists bool) (*RGWUser, error) {
 	glog.Infof("Creating user %q", userName)
 
 	// Set request parameters.
 	params := make(url.Values)
 	params.Set("uid", userName)
-        params.Set("display-name", "rgw-broker-"+bindingID)
+        params.Set("display-name", displayName)
         params.Set("key-type", "s3")
         params.Set("generate-key", "true")
 
-        _, err := b.rgwAdminRequest("PUT", "user", params)
+        resp, err := rgw.rgwAdminRequestRaw("PUT", "user", params)
 	if err != nil {
 		glog.Errorf("Error creating user: %v", err)
 		return nil, fmt.Errorf("Error creating user: %v", err)
 	}
+        defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && !(successIfExists && resp.StatusCode == 409) {
+                glog.Errorf("Error got http resonse: %v", resp.StatusCode)
+                return nil, fmt.Errorf("Error got http response: %v", resp.StatusCode)
+	}
 
         params = make(url.Values)
 	params.Set("uid", userName)
-        body, err := b.rgwAdminRequest("GET", "user", params)
+        body, err := rgw.rgwAdminRequest("GET", "user", params)
 	if err != nil {
 		glog.Errorf("Error fetching user info: %v", err)
                 return nil, fmt.Errorf("Error fetching user info: %v", err)
@@ -384,27 +426,95 @@ func (b *broker) provisionUser(userName, bindingID string) (*RGWUser, error) {
         return user, nil
 }
 
+func (rgw *RGWClient) getBucketId(bucketName string) (string, error) {
+	glog.Infof("Getting bucket-id for buceket=%q", bucketName)
 
+	// Set request parameters.
+	params := make(url.Values)
+        params.Set("key", "bucket:" + bucketName)
 
-// Returns true if the passed-in bucket exists.
-// TODO: long way of checking for bucket name collision. gluster-swift does not support
-//   the api call that minio.BucketExists() maps to; always fails with "400 bad request".
-func (b *broker) checkBucketExists(bucketName string) (bool, error) {
-	glog.Infof("Checking if bucket name %q already exists.", bucketName)
-	buckets, err := b.rgw.client.ListBuckets()
+        body, err := rgw.rgwAdminRequest("GET", "metadata", params)
 	if err != nil {
-		glog.Errorf("Error occurred during ListBuckets: %v", err)
-		return false, fmt.Errorf("Error occurred during ListBuckets: %v", err)
+		glog.Errorf("Error fetching bucket metadata info: %v", err)
+                return "", fmt.Errorf("Error fetching bucket metadata info: %v", err)
 	}
-	exists := false
-	for _, bucket := range buckets {
-		if bucketName == bucket.Name {
-			exists = true
-			break
-		}
-	}
-	return exists, nil
+
+        type bucketEntrypointInfo struct {
+                Data struct {
+                        Bucket  struct {
+                                Name string     `json:"name"`
+                                Marker string   `json:"marker"`
+                                BucketId string `json:"bucket_id"`
+                        } `json:"bucket"`
+                } `json:"data"`
+        }
+
+        res := bucketEntrypointInfo{}
+        err = json.Unmarshal(body, &res)
+        if (err != nil) {
+                glog.Errorf("Error failed to unmarshal bucket entrypoint info: %v", err)
+                return "", fmt.Errorf("Error failed to unmarshal bucket entrypoint info: %v", err)
+        }
+
+        glog.Infof("retrieved bucket_id=%s)", res.Data.Bucket.BucketId)
+
+        return res.Data.Bucket.BucketId, nil
 }
+
+
+
+func (rgw *RGWClient) unlinkBucket(userName, bucketName string) error {
+	glog.Infof("Unlinking bucket %s/%s", userName, bucketName)
+
+	// Set request parameters.
+	params := make(url.Values)
+        params.Set("uid", userName)
+        params.Set("bucket", bucketName)
+
+        _, err := rgw.rgwAdminRequest("POST", "bucket", params)
+	if err != nil {
+		glog.Errorf("Error unlinking bucket %s: %v", bucketName, err)
+		return fmt.Errorf("Error unlinking bucket %s: %v", bucketName, err)
+	}
+
+        return nil
+}
+
+func (rgw *RGWClient) linkBucket(userName, bucketName, bucketId string) error {
+	glog.Infof("Linking bucket %s/%s", userName, bucketName)
+
+	// Set request parameters.
+	params := make(url.Values)
+        params.Set("uid", userName)
+        params.Set("bucket", bucketName)
+        params.Set("bucket-id", bucketId)
+
+        _, err := rgw.rgwAdminRequest("PUT", "bucket", params)
+	if err != nil {
+		glog.Errorf("Error linking bucket %s: %v", bucketName, err)
+		return fmt.Errorf("Error linking bucket %s: %v", bucketName, err)
+	}
+
+        return nil
+}
+
+func (rgw *RGWClient) suspendUser(userName string) error {
+	glog.Infof("Suspending user %q", userName)
+
+	// Set request parameters.
+	params := make(url.Values)
+	params.Set("uid", userName)
+        params.Set("suspended", "true")
+
+        _, err := rgw.rgwAdminRequest("POST", "user", params)
+	if err != nil {
+		glog.Errorf("Error creating user: %v", err)
+		return fmt.Errorf("Error creating user: %v", err)
+	}
+
+        return nil
+}
+
 
 // Returns a minio api client.
 func getS3Client(user RGWUser, endpoint string) (*minio.Client, error) {
