@@ -3,7 +3,7 @@
 # Specify
 #   --set image=gcr.io/openshift-gce-devel/cns-obj-broker:<tag> 
 # with `helm install` to use a non-default version. Useful for running WIP images.
-image: 172.17.8.1:5000/cns-obj-broker:d709f01-dirty-49
+image: 172.17.8.1:5000/cns-obj-broker:00f01d6-dirty-52
 # ImagePullPolicy; valid values are "IfNotPresent", "Never", and "Always"
 imagePullPolicy: Always
 
@@ -13,3 +13,4 @@ S3AccessKey: KWB4HK2NTY4D0YR7
 S3Secret: Fjg7ACac4uCVhxZcFkOeJofXUM7tXdQW
 RGWUIDPrefix: mykube-
 RGWGCUser: kube-gc
+RGWDataBucket: kube-rgw-data

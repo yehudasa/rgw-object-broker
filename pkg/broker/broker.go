@@ -46,7 +46,7 @@ const (
 	SECRET_KEY	= "secretKey"
 )
 
-type s3ServiceInstance struct {
+type rgwServiceInstance struct {
 	// k8s namespace
 	Namespace string
 	// binding credential created during Bind()
@@ -93,12 +93,13 @@ type broker struct {
 	// rwMutex controls concurrent R and RW access
 	rwMutex	    sync.RWMutex
 	// instanceMap maps instanceIDs to the ID's userProvidedServiceInstance values
-	instanceMap map[string]*s3ServiceInstance
+	instanceMap map[string]*rgwServiceInstance
 
         rgw         RGWClient
 
 	uidPrefix   string
 	gcUser      string
+	dataBucket  string
 
 	// client used to access kubernetes
 	kubeClient  *clientset.Clientset
@@ -112,7 +113,7 @@ type bucketInstance struct {
 
 // Initialize the rgw service broker. This function is called by `server.Start()`.
 func CreateBroker() Broker {
-	var instanceMap = make(map[string]*s3ServiceInstance)
+	var instanceMap = make(map[string]*rgwServiceInstance)
 	glog.Info("Generating new s3 broker.")
 
 	// get the kubernetes client
@@ -124,6 +125,7 @@ func CreateBroker() Broker {
 
         client := RGWClient{}
         uidPrefix := "kube-rgw."
+        dataBucket := "kube-rgw-data"
         gcUser := ""
 
         for _, e := range os.Environ() {
@@ -139,6 +141,8 @@ func CreateBroker() Broker {
                         uidPrefix = pair[1]
 		case "RGW_GC_USER":
                         gcUser = pair[1]
+		case "RGW_DATA_BUCKET":
+                        dataBucket = pair[1]
 		}
         }
 
@@ -157,6 +161,12 @@ func CreateBroker() Broker {
                 }
         }
 
+        err = client.createBucket(dataBucket)
+        if (err != nil) {
+                glog.Fatalf("Error: failed to create bucket %s", dataBucket)
+                return nil
+        }
+
 	glog.Infof("New Broker for s3 endpoint: %s", client.endpoint)
 	return &broker{
 		instanceMap: instanceMap,
@@ -164,6 +174,7 @@ func CreateBroker() Broker {
 		kubeClient:  cs,
 		uidPrefix:   uidPrefix,
                 gcUser:      gcUser,
+                dataBucket:  dataBucket,
 	}
 }
 // Implements the `Catalog` interface method.
@@ -188,6 +199,18 @@ func (b *broker) Catalog() (*brokerapi.Catalog, error) {
 	}, nil
 }
 
+func (b *broker) findInstance(instanceID string) (*rgwServiceInstance, error) {
+	instance, ok := b.instanceMap[instanceID]
+	if !ok {
+                var err error
+                instance, err = b.getInstanceInfo(instanceID)
+                if err != nil {
+                        return nil, retErrInfof("InstanceID %q not found.", instanceID)
+                }
+	}
+        return instance, nil
+}
+
 // The `GetServiceInstanceLastOperation` interface method is not implemented.
 func (b *broker) GetServiceInstanceLastOperation(instanceID, serviceID, planID, operation string) (*brokerapi.LastOperationResponse, error) {
 	glog.Info("GetServiceInstanceLastOperation not yet implemented.")
@@ -202,10 +225,12 @@ func (b *broker) CreateServiceInstance(instanceID string, req *brokerapi.CreateS
 	b.rwMutex.Lock()
 	defer b.rwMutex.Unlock()
 	// does service instance exist?
-	if _, ok := b.instanceMap[instanceID]; ok {
-		glog.Errorf("Instance requested already exists.")
-		return nil, fmt.Errorf("ServiceInstance %q already exists", instanceID)
+
+        _, err := b.findInstance(instanceID)
+	if err == nil {
+		return nil, retErrInfof("Instance requested already exists.")
 	}
+
 	// Check required parameter "bucketName"
 	bucketName, ok := req.Parameters["bucketName"].(string)
 	if !ok {
@@ -224,9 +249,10 @@ func (b *broker) CreateServiceInstance(instanceID string, req *brokerapi.CreateS
                 return nil, err
         }
 
-        newClient := RGWClient{}
-        newClient.user = *newUser
-        newClient.endpoint = b.rgw.endpoint
+        newClient := RGWClient{
+                user: *newUser,
+                endpoint: b.rgw.endpoint,
+        }
         err = newClient.init()
         if err != nil {
                 glog.Errorf("Failed to init s3 client for new user: %v", err)
@@ -236,7 +262,8 @@ func (b *broker) CreateServiceInstance(instanceID string, req *brokerapi.CreateS
 	if err := newClient.createBucket(bucketName); err != nil {
 		return nil, err
 	}
-	b.instanceMap[instanceID] = &s3ServiceInstance{
+
+        instanceInfo := rgwServiceInstance{
 		Namespace: req.ContextProfile.Namespace,
 		Credential: brokerapi.Credential{
 			USER_NAME:       newUser.name,
@@ -246,6 +273,14 @@ func (b *broker) CreateServiceInstance(instanceID string, req *brokerapi.CreateS
 			SECRET_KEY:	 newUser.secret,
 		},
 	}
+
+        err = b.storeInstanceInfo(instanceID, instanceInfo)
+        if (err != nil) {
+                return nil, retErrInfof("Error: failed to store instance info: %s", err)
+        }
+
+	b.instanceMap[instanceID] = &instanceInfo
+
 	return nil, nil
 }
 
@@ -254,15 +289,17 @@ func (b *broker) RemoveServiceInstance(instanceID, serviceID, planID string, acc
 	glog.Infof("RemoveServiceInstance called. instanceID: %s", instanceID)
 	b.rwMutex.Lock()
 	defer b.rwMutex.Unlock()
-	instance, ok := b.instanceMap[instanceID]
-	if !ok {
-		glog.Errorf("InstanceID %q not found.", instanceID)
-		return nil, fmt.Errorf("Broker cannot find instanceID %q.", instanceID)
+        instance, err := b.findInstance(instanceID)
+	if err != nil {
+                glog.Errorf("InstanceID %q not found.", instanceID)
+                /* don't return error, if it wasn't found it was already removed */
+                return nil, nil
 	}
+
 	userName := instance.Credential[USER_NAME].(string)
 	bucketName := instance.Credential[BUCKET_NAME].(string)
 
-        err := b.rgw.suspendUser(instance.Credential[USER_NAME].(string))
+        err = b.rgw.suspendUser(instance.Credential[USER_NAME].(string))
 	if err != nil {
 		glog.Errorf("Error failed to suspend user: %v", err)
 		return nil, fmt.Errorf("Error failed to suspend user: %v", err)
@@ -284,6 +321,11 @@ func (b *broker) RemoveServiceInstance(instanceID, serviceID, planID string, acc
                 return nil, fmt.Errorf("Error failed to unlink bucket %s/%s: %v", userName, bucketName, err)
         }
 
+        err = b.removeInstanceInfo(instanceID)
+        if err != nil {
+                glog.Infof("Warning: failed to clean instance info: instanceID=%s: %s", instanceID, err)
+        }
+
 	delete(b.instanceMap, BUCKET_NAME)
 	glog.Infof("Remove bucket %q succeeded.", bucketName)
 	return nil, nil
@@ -292,11 +334,11 @@ func (b *broker) RemoveServiceInstance(instanceID, serviceID, planID string, acc
 // Implements the `Bind` interface method.
 func (b *broker) Bind(instanceID, bindingID string, req *brokerapi.BindingRequest) (*brokerapi.CreateServiceBindingResponse, error) {
 	glog.Infof("Bind called. instanceID: %q", instanceID)
-	instance, ok := b.instanceMap[instanceID]
-	if !ok {
-		glog.Errorf("Instance ID %q not found.")
+        instance, err := b.findInstance(instanceID)
+	if err != nil {
 		return nil, fmt.Errorf("Instance ID %q not found.", instanceID)
 	}
+
 	if len(instance.Credential) == 0 {
 		glog.Errorf("Instance %q is missing credentials.", instanceID)
 		return nil, fmt.Errorf("No credentials found for instance %q.", instanceID)
@@ -312,6 +354,66 @@ func (b *broker) Bind(instanceID, bindingID string, req *brokerapi.BindingReques
 func (b *broker) UnBind(instanceID, bindingID, serviceID, planID string) error {
 	glog.Info("UnBind not yet implemented.")
 	return nil
+}
+
+func (b *broker) storeInfo(section, id string, object interface{}) error {
+	data, err := json.Marshal(object)
+	if err != nil {
+                glog.Errorf("Error failed to marshal object %s/%s: %s", section, id, err)
+                return fmt.Errorf("Error failed to marshal object %s/%s: %s", section, id, err)
+	}
+
+        n, err := b.rgw.client.PutObject(b.dataBucket, section + "/" +id, bytes.NewReader(data), "application/json")
+        if err != nil {
+                glog.Errorf("Error failed to PutObject() %s/%s: %s", section, id, err)
+                return fmt.Errorf("Error failed to PutObject() %s/%s", section, id)
+        }
+        if n != int64(len(data)) {
+                glog.Errorf("Error PutObject() unexpected num of bytes written %s/%s: expected %d wrote %d", section, id, len(data), n)
+                return fmt.Errorf("Error PutObject() unexpected num of bytes written %s/%s: expected %d wrote %d", section, id, len(data), n)
+        }
+        return nil
+}
+
+func (b *broker) readInfo(section, id string, object interface{}) error {
+        r, err := b.rgw.client.GetObject(b.dataBucket, section + "/" + id)
+        if err != nil {
+                return retErrInfof("Error failed to GetObject() %s/%s: %s", section, id, err)
+        }
+
+	buf, err := ioutil.ReadAll(r)
+	if err != nil {
+                return retErrInfof("Error failed to ReadAll() %s/%s: %s", section, id, err)
+	}
+
+	err = json.Unmarshal(buf, &object)
+	if err != nil {
+                return retErrInfof("Error failed to unmarshal object %s/%s: %s", section, id, err)
+	}
+        return nil
+}
+
+func (b *broker) removeInfo(section, id string) error {
+        err := b.rgw.client.RemoveObject(b.dataBucket, section + "/" + id)
+        if err != nil {
+                return retErrInfof("Error failed to RemoveObject() %s/%s: %s", section, id, err)
+        }
+        return nil
+}
+
+
+func (b *broker) storeInstanceInfo(id string, info rgwServiceInstance) error {
+        return b.storeInfo("instance", id, info)
+}
+
+func (b *broker) getInstanceInfo(id string) (*rgwServiceInstance, error) {
+        info := new(rgwServiceInstance)
+        err := b.readInfo("instance", id, info)
+        return info, err
+}
+
+func (b *broker) removeInstanceInfo(id string) error {
+        return b.removeInfo("instance", id)
 }
 
 func (rgw *RGWClient) rgwAdminRequestRaw(method, section string, params url.Values) (*http.Response, error) {
@@ -365,7 +467,6 @@ func (rgw *RGWClient) rgwAdminRequest(method, section string, params url.Values)
 
         return body, nil
 }
-
 
 func (rgw *RGWClient) provisionUser(userName, displayName string, successIfExists bool) (*RGWUser, error) {
 	glog.Infof("Creating user %q", userName)
@@ -452,8 +553,7 @@ func (rgw *RGWClient) getBucketId(bucketName string) (string, error) {
         res := bucketEntrypointInfo{}
         err = json.Unmarshal(body, &res)
         if (err != nil) {
-                glog.Errorf("Error failed to unmarshal bucket entrypoint info: %v", err)
-                return "", fmt.Errorf("Error failed to unmarshal bucket entrypoint info: %v", err)
+                return "", retErrInfof("Error failed to unmarshal bucket entrypoint info: %v", err)
         }
 
         glog.Infof("retrieved bucket_id=%s)", res.Data.Bucket.BucketId)
@@ -481,7 +581,7 @@ func (rgw *RGWClient) unlinkBucket(userName, bucketName string) error {
 }
 
 func (rgw *RGWClient) linkBucket(userName, bucketName, bucketId string) error {
-	glog.Infof("Linking bucket %s/%s", userName, bucketName)
+	glog.Infof("Linking bucket %s/%s to user %s", userName, bucketName, userName)
 
 	// Set request parameters.
 	params := make(url.Values)
@@ -553,3 +653,8 @@ func getKubeClient() (*clientset.Clientset, error) {
 	return cs, err
 }
 
+
+func retErrInfof(format string, args ...interface{}) error {
+        glog.Infof(format, args)
+        return fmt.Errorf(format, args)
+}

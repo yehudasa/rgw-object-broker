@@ -13,3 +13,4 @@ S3AccessKey: KWB4HK2NTY4D0YR7
 S3Secret: Fjg7ACac4uCVhxZcFkOeJofXUM7tXdQW
 RGWUIDPrefix: mykube-
 RGWGCUser: kube-gc
+RGWDataBucket: kube-rgw-data

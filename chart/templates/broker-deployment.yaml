@@ -56,3 +56,5 @@ spec:
           value: {{ .Values.RGWUIDPrefix }}
         - name: RGW_GC_USER
           value: {{ .Values.RGWGCUser }}
+        - name: RGW_DATA_BUCKET
+          value: {{ .Values.RGWDataBucket }}
