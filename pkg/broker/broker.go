@@ -121,7 +121,7 @@ type bucketInstance struct {
 // Initialize the rgw service broker. This function is called by `server.Start()`.
 func CreateBroker() Broker {
 	var instanceMap = make(map[string]*rgwServiceInstance)
-	glog.Info("Generating new s3 broker.")
+	glog.Info("Generating new Ceph rgw object broker.")
 
 	// get the kubernetes client
 	cs, err := getKubeClient()
@@ -138,11 +138,11 @@ func CreateBroker() Broker {
         for _, e := range os.Environ() {
                 pair := strings.Split(e, "=")
                 switch pair[0] {
-		case "S3_ENDPOINT":
+		case "RGW_ENDPOINT":
                         client.endpoint = pair[1]
-		case "S3_ACCESS_KEY":
+		case "RGW_ACCESS_KEY":
                         client.user.accessKey = pair[1]
-		case "S3_SECRET":
+		case "RGW_SECRET":
                         client.user.secret = pair[1]
 		case "RGW_UID_PREFIX":
                         uidPrefix = pair[1]
@@ -174,7 +174,7 @@ func CreateBroker() Broker {
                 return nil
         }
 
-	glog.Infof("New Broker for s3 endpoint: %s", client.endpoint)
+	glog.Infof("New Broker for rgw endpoint: %s", client.endpoint)
 	return &broker{
 		instanceMap: instanceMap,
 		rgw:         client,
@@ -189,9 +189,9 @@ func (b *broker) Catalog() (*brokerapi.Catalog, error) {
 	return &brokerapi.Catalog{
 		Services: []*brokerapi.Service{
 			{
-				Name:        "cns-bucket-service",
+				Name:        "rgw-bucket-service",
 				ID:          "0",
-				Description: "A bucket of storage object backed by CNS.",
+				Description: "A bucket of storage object backed by Ceph RGW.",
 				Bindable:    true,
 				Plans: []brokerapi.ServicePlan{
 					{
@@ -224,7 +224,7 @@ func (b *broker) GetServiceInstanceLastOperation(instanceID, serviceID, planID, 
 	return nil, nil
 }
 
-// Implements the `CreateServiceInstance` interface method by creating (provisioning) a s3 bucket.
+// Implements the `CreateServiceInstance` interface method by creating (provisioning) a bucket.
 // Note: (nil, nil) is returned for success, meaning the CreateServiceInstanceResponse is ignored by
 //   the caller.
 func (b *broker) CreateServiceInstance(instanceID string, req *brokerapi.CreateServiceInstanceRequest) (*brokerapi.CreateServiceInstanceResponse, error) {

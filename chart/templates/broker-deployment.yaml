@@ -21,7 +21,7 @@ spec:
         heritage: "{{ .Release.Service }}"
     spec:
       containers:
-      - name: cns-obj-broker
+      - name: rgw-obj-broker
         image: {{ .Values.image }}
         imagePullPolicy: {{ .Values.imagePullPolicy }}
         args:
@@ -46,12 +46,12 @@ spec:
           successThreshold: 1
           timeoutSeconds: 2
         env:
-        - name: S3_ENDPOINT
-          value: {{ .Values.S3Endpoint }}
-        - name: S3_ACCESS_KEY
-          value: {{ .Values.S3AccessKey }}
-        - name: S3_SECRET
-          value: {{ .Values.S3Secret }}
+        - name: RGW_ENDPOINT
+          value: {{ .Values.RGWEndpoint }}
+        - name: RGW_ACCESS_KEY
+          value: {{ .Values.RGWAccessKey }}
+        - name: RGW_SECRET
+          value: {{ .Values.RGWSecret }}
         - name: RGW_UID_PREFIX
           value: {{ .Values.RGWUIDPrefix }}
         - name: RGW_GC_USER

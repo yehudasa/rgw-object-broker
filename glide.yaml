@@ -1,4 +1,4 @@
-package: github.com/cns-object-broker
+package: github.com/rgw-object-broker
 import:
 - package: github.com/golang/glog
 - package: github.com/gorilla/mux

@@ -1,16 +1,16 @@
-# Default values for CNS Object Broker
+# Default values for RGW Object Broker
 # Image to use.  Default is :v1.
 # Specify
-#   --set image=gcr.io/openshift-gce-devel/cns-obj-broker:<tag> 
+#   --set image=gcr.io/openshift-gce-devel/rgw-obj-broker:<tag> 
 # with `helm install` to use a non-default version. Useful for running WIP images.
-image: 172.17.8.1:5000/cns-obj-broker:65fa505-dirty-57
+image: 172.17.8.1:5000/rgw-obj-broker:0c6c9a9-dirty-64
 # ImagePullPolicy; valid values are "IfNotPresent", "Never", and "Always"
 imagePullPolicy: Always
 
 # Endpoint related secrets should be here
-S3Endpoint: http://10.17.112.2:8000
-S3AccessKey: KWB4HK2NTY4D0YR7
-S3Secret: Fjg7ACac4uCVhxZcFkOeJofXUM7tXdQW
+RGWEndpoint: http://10.17.112.2:8000
+RGWAccessKey: KWB4HK2NTY4D0YR7
+RGWSecret: Fjg7ACac4uCVhxZcFkOeJofXUM7tXdQW
 RGWUIDPrefix: mykube-
 RGWGCUser: kube-gc
 RGWDataBucket: kube-rgw-data

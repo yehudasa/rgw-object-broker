@@ -27,8 +27,8 @@ import (
 	"syscall"
 
 	"github.com/golang/glog"
-	"github.com/cns-object-broker/pkg/broker"
-	"github.com/cns-object-broker/pkg/server"
+	"github.com/rgw-object-broker/pkg/broker"
+	"github.com/rgw-object-broker/pkg/server"
 )
 
 var options struct {

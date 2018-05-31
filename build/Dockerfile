@@ -14,6 +14,6 @@
 
 FROM debian:jessie 
 
-ADD cns-obj-broker /opt/services/cns-obj-broker
+ADD rgw-obj-broker /opt/services/rgw-obj-broker
 
-ENTRYPOINT ["/opt/services/cns-obj-broker", "-alsologtostderr=true"]
+ENTRYPOINT ["/opt/services/rgw-obj-broker", "-alsologtostderr=true"]

@@ -1,6 +1,6 @@
 REPO_ROOT=$(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 BIN_DIR=$(REPO_ROOT)/bin
-BIN_TARGET=cns-obj-broker
+BIN_TARGET=rgw-obj-broker
 PKG_DIR=$(REPO_ROOT)/main
 BUILD_DIR=$(REPO_ROOT)/build
 BUILD_COUNT_FILE=.build
@@ -8,7 +8,7 @@ BUILD_COUNT_FILE=.build
 # DOCKER TAG VARS
 REGISTRY=172.17.8.1:5000
 # gcr.io/openshift-gce-devel
-IMAGE=cns-obj-broker
+IMAGE=rgw-obj-broker
 DIRTY_HASH=$(shell git describe --always --abbrev=7 --dirty)-$(shell cat $(BUILD_COUNT_FILE))
 VERSION=v1
 
