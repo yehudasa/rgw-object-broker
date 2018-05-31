@@ -270,6 +270,10 @@ func (b *broker) CreateServiceInstance(instanceID string, req *brokerapi.CreateS
 		return nil, err
 	}
 
+	if err := b.rgw.modifyUser(userName, "max-buckets", "-1"); err != nil {
+		return nil, err
+	}
+
         instanceInfo := rgwServiceInstance{
 		Namespace: req.ContextProfile.Namespace,
                 Endpoint: newClient.endpoint,
@@ -308,20 +312,25 @@ func (b *broker) RemoveServiceInstance(instanceID, serviceID, planID string, acc
 		return nil, fmt.Errorf("Error failed to suspend user: %v", err)
 	}
 
-        bucketId, err := b.rgw.getBucketId(bucketName)
-        if err != nil {
-                return nil, fmt.Errorf("Error failed to retrieve bucket id for bucket %q: %v", bucketName, err)
-        }
-	glog.Infof("bucketId: %s", bucketId)
+        var status int
 
-        err = b.rgw.unlinkBucket(userName, bucketName)
-        if err != nil {
-                return nil, fmt.Errorf("Error failed to unlink bucket %s/%s: %v", userName, bucketName, err)
-        }
+        bucketId, err := b.rgw.getBucketId(bucketName, &status)
+        if status != http.StatusNotFound {
+                if err != nil {
+                        return nil, fmt.Errorf("Error failed to retrieve bucket id for bucket %q: %v", bucketName, err)
+                }
 
-        err = b.rgw.linkBucket(b.gcUser, bucketName, bucketId)
-        if err != nil {
-                return nil, fmt.Errorf("Error failed to unlink bucket %s/%s: %v", userName, bucketName, err)
+                glog.Infof("bucketId: %s", bucketId)
+
+                err = b.rgw.unlinkBucket(userName, bucketName)
+                if err != nil {
+                        return nil, fmt.Errorf("Error failed to unlink bucket %s/%s: %v", userName, bucketName, err)
+                }
+
+                err = b.rgw.linkBucket(b.gcUser, bucketName, bucketId)
+                if err != nil {
+                        return nil, fmt.Errorf("Error failed to unlink bucket %s/%s: %v", userName, bucketName, err)
+                }
         }
 
         err = b.removeInstanceInfo(instanceID)
@@ -524,13 +533,17 @@ func (rgw *RGWClient) rgwAdminRequestRaw(method, section, resource string, param
         return resp, nil
 }
 
-func (rgw *RGWClient) rgwAdminRequest(method, section, resource string, params url.Values) ([]byte, error) {
+func (rgw *RGWClient) rgwAdminRequest(method, section, resource string, params url.Values, status *int) ([]byte, error) {
         resp, err := rgw.rgwAdminRequestRaw(method, section, resource, params)
         if err != nil {
                 return nil, err
         }
 
         defer resp.Body.Close()
+
+        if status != nil {
+                *status = resp.StatusCode
+        }
 
 	if resp.StatusCode != http.StatusOK {
                 glog.Errorf("Error got http resonse: %v", resp.StatusCode)
@@ -557,7 +570,7 @@ type userInfo struct {
 func (rgw *RGWClient) getUserInfo(userName string) (*userInfo, error) {
         params := make(url.Values)
 	params.Set("uid", userName)
-        body, err := rgw.rgwAdminRequest("GET", "user", "", params)
+        body, err := rgw.rgwAdminRequest("GET", "user", "", params, nil)
 	if err != nil {
 		glog.Errorf("Error fetching user info: %v", err)
                 return nil, fmt.Errorf("Error fetching user info: %v", err)
@@ -621,17 +634,32 @@ func (rgw *RGWClient) provisionUser(userName, displayName string, genAccessKey, 
         return user, nil
 }
 
-func (rgw *RGWClient) getBucketId(bucketName string) (string, error) {
+func (rgw *RGWClient) modifyUser(userName, param, val string) error {
+	glog.Infof("Modifying user user %q (%s=%s)", userName, param, val)
+
+	// Set request parameters.
+	params := make(url.Values)
+	params.Set("uid", userName)
+	params.Set(param, val)
+
+        _, err := rgw.rgwAdminRequest("POST", "user", "", params, nil)
+	if err != nil {
+		return retErrInfof("Error modifying user: %v", err)
+	}
+
+        return nil
+}
+
+func (rgw *RGWClient) getBucketId(bucketName string, status *int) (string, error) {
 	glog.Infof("Getting bucket-id for buceket=%q", bucketName)
 
 	// Set request parameters.
 	params := make(url.Values)
         params.Set("key", "bucket:" + bucketName)
 
-        body, err := rgw.rgwAdminRequest("GET", "metadata", "", params)
+        body, err := rgw.rgwAdminRequest("GET", "metadata", "", params, status)
 	if err != nil {
-		glog.Errorf("Error fetching bucket metadata info: %v", err)
-                return "", fmt.Errorf("Error fetching bucket metadata info: %v", err)
+                return "", retErrInfof("Error fetching bucket metadata info: %v", err)
 	}
 
         type bucketEntrypointInfo struct {
@@ -663,7 +691,7 @@ func (rgw *RGWClient) unlinkBucket(userName, bucketName string) error {
         params.Set("uid", userName)
         params.Set("bucket", bucketName)
 
-        _, err := rgw.rgwAdminRequest("POST", "bucket", "", params)
+        _, err := rgw.rgwAdminRequest("POST", "bucket", "", params, nil)
 	if err != nil {
 		glog.Errorf("Error unlinking bucket %s: %v", bucketName, err)
 		return fmt.Errorf("Error unlinking bucket %s: %v", bucketName, err)
@@ -681,7 +709,7 @@ func (rgw *RGWClient) linkBucket(userName, bucketName, bucketId string) error {
         params.Set("bucket", bucketName)
         params.Set("bucket-id", bucketId)
 
-        _, err := rgw.rgwAdminRequest("PUT", "bucket", "", params)
+        _, err := rgw.rgwAdminRequest("PUT", "bucket", "", params, nil)
 	if err != nil {
 		glog.Errorf("Error linking bucket %s: %v", bucketName, err)
 		return fmt.Errorf("Error linking bucket %s: %v", bucketName, err)
@@ -698,7 +726,7 @@ func (rgw *RGWClient) suspendUser(userName string) error {
 	params.Set("uid", userName)
         params.Set("suspended", "true")
 
-        _, err := rgw.rgwAdminRequest("POST", "user", "", params)
+        _, err := rgw.rgwAdminRequest("POST", "user", "", params, nil)
 	if err != nil {
 		glog.Errorf("Error creating user: %v", err)
 		return fmt.Errorf("Error creating user: %v", err)
@@ -750,7 +778,7 @@ func (rgw *RGWClient) createKey(userName string) (*RGWUser, error) {
         params.Set("key-type", "s3")
         params.Set("generate-key", "true")
 
-        _, err = rgw.rgwAdminRequest("PUT", "user", "key", params)
+        _, err = rgw.rgwAdminRequest("PUT", "user", "key", params, nil)
 	if err != nil {
 		return nil, retErrInfof("Error generating access key: %v", err)
 	}
@@ -789,7 +817,7 @@ func (rgw *RGWClient) removeKey(userName, accessKey string) error {
 	params.Set("uid", userName)
         params.Set("access-key", accessKey)
 
-        _, err := rgw.rgwAdminRequest("DELETE", "user", "key", params)
+        _, err := rgw.rgwAdminRequest("DELETE", "user", "key", params, nil)
 	if err != nil {
 		return retErrInfof("Error removing access key: %v", err)
 	}
