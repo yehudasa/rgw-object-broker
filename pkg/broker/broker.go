@@ -22,6 +22,8 @@ import (
 	"strings"
 	"time"
 	"bytes"
+        "encoding/binary"
+	"crypto/rand"
 	"io/ioutil"
 	"encoding/json"
 	"github.com/golang/glog"
@@ -29,7 +31,6 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
-
 	"github.com/kubernetes-incubator/service-catalog/pkg/brokerapi"
 	"github.com/minio/minio-go"
 	"github.com/minio/minio-go/pkg/s3signer"
@@ -49,6 +50,12 @@ const (
 type rgwServiceInstance struct {
 	// k8s namespace
 	Namespace string
+        Endpoint string
+	UserName string
+        BucketName string
+}
+
+type rgwBindInfo struct {
 	// binding credential created during Bind()
 	Credential brokerapi.Credential // s3 server url, includes port and bucket name
 }
@@ -154,7 +161,7 @@ func CreateBroker() Broker {
 
         if gcUser == "" {
                 gcUser = "rgw-kube-gc-user"
-                _, err := client.provisionUser(gcUser, "rgw-broker-gc-" + gcUser, true)
+                _, err := client.provisionUser(gcUser, "rgw-broker-gc-" + gcUser, false, true)
                 if err != nil {
                         glog.Fatalf("failed to create a user for broker gc: %v\n", err)
                         return nil
@@ -244,7 +251,7 @@ func (b *broker) CreateServiceInstance(instanceID string, req *brokerapi.CreateS
         userName := b.uidPrefix + xid.New().String()
 
         // First create a new user
-        newUser, err := b.rgw.provisionUser(userName, "rgw-broker-instance-" + instanceID, false)
+        newUser, err := b.rgw.provisionUser(userName, "rgw-broker-instance-" + instanceID, true, false)
         if err != nil {
                 return nil, err
         }
@@ -265,13 +272,9 @@ func (b *broker) CreateServiceInstance(instanceID string, req *brokerapi.CreateS
 
         instanceInfo := rgwServiceInstance{
 		Namespace: req.ContextProfile.Namespace,
-		Credential: brokerapi.Credential{
-			USER_NAME:       newUser.name,
-			BUCKET_NAME:     bucketName,
-			BUCKET_ENDPOINT: newClient.endpoint,
-                        ACCESS_KEY:      newUser.accessKey,
-			SECRET_KEY:	 newUser.secret,
-		},
+                Endpoint: newClient.endpoint,
+                UserName: newUser.name,
+                BucketName: bucketName,
 	}
 
         err = b.storeInstanceInfo(instanceID, instanceInfo)
@@ -296,10 +299,10 @@ func (b *broker) RemoveServiceInstance(instanceID, serviceID, planID string, acc
                 return nil, nil
 	}
 
-	userName := instance.Credential[USER_NAME].(string)
-	bucketName := instance.Credential[BUCKET_NAME].(string)
+        userName := instance.UserName
+        bucketName := instance.BucketName
 
-        err = b.rgw.suspendUser(instance.Credential[USER_NAME].(string))
+        err = b.rgw.suspendUser(userName)
 	if err != nil {
 		glog.Errorf("Error failed to suspend user: %v", err)
 		return nil, fmt.Errorf("Error failed to suspend user: %v", err)
@@ -339,90 +342,165 @@ func (b *broker) Bind(instanceID, bindingID string, req *brokerapi.BindingReques
 		return nil, fmt.Errorf("Instance ID %q not found.", instanceID)
 	}
 
-	if len(instance.Credential) == 0 {
-		glog.Errorf("Instance %q is missing credentials.", instanceID)
-		return nil, fmt.Errorf("No credentials found for instance %q.", instanceID)
+	if instance.UserName == "" {
+		return nil, retErrInfof("No user found for instance %q.", instanceID)
 	}
+
+        oldInfo, err := b.getBindInfo(instanceID, bindingID)
+        if err == nil {
+                glog.Infof("Bind ID already exists, returning existing info")
+                return &brokerapi.CreateServiceBindingResponse{
+                        Credentials: oldInfo.Credential,
+                }, nil
+        }
+
+        key, err := b.rgw.createKey(instance.UserName)
+        if err != nil {
+                return nil, retErrInfof("Error: failed to create access key: %s", err)
+        }
+        creds := brokerapi.Credential{
+                USER_NAME:       instance.UserName,
+                BUCKET_NAME:     instance.BucketName,
+                BUCKET_ENDPOINT: instance.Endpoint,
+                ACCESS_KEY:      key.accessKey,
+                SECRET_KEY:      key.secret,
+        }
+
+        bInfo := rgwBindInfo {
+                Credential: creds,
+        }
+
+        err = b.storeBindInfo(instanceID, bindingID, bInfo)
+
+
 	glog.Infof("Bind instance %q succeeded.", instanceID)
 	return &brokerapi.CreateServiceBindingResponse{
-		Credentials: instance.Credential,
+		Credentials: creds,
 	}, nil
 }
 
 // nothing to do here
 // The `UnBind` interface method is not implemented.
 func (b *broker) UnBind(instanceID, bindingID, serviceID, planID string) error {
-	glog.Info("UnBind not yet implemented.")
+        glog.Infof("Bind called. instanceID: %q, bindingID: %q", instanceID, bindingID)
+        instance, err := b.findInstance(instanceID)
+	if err != nil {
+		glog.Infof("Instance ID %q not found.", instanceID)
+                /* don't return error */
+		return nil
+	}
+
+
+        oldInfo, err := b.getBindInfo(instanceID, bindingID)
+        if err != nil {
+                glog.Infof("Bind ID not found, assume was already removed")
+                return nil
+        }
+
+        err = b.rgw.removeKey(instance.UserName, oldInfo.Credential[ACCESS_KEY].(string))
+        if err != nil {
+                glog.Infof("Failed to remove access key")
+                return err
+        }
+
+        err = b.removeBindInfo(instanceID, bindingID)
+        if err != nil {
+                glog.Infof("Failed to remove binding info")
+                return nil
+        }
 	return nil
 }
 
-func (b *broker) storeInfo(section, id string, object interface{}) error {
+func (b *broker) storeInfo(oid string, object interface{}) error {
 	data, err := json.Marshal(object)
 	if err != nil {
-                glog.Errorf("Error failed to marshal object %s/%s: %s", section, id, err)
-                return fmt.Errorf("Error failed to marshal object %s/%s: %s", section, id, err)
+                return retErrInfof("Error failed to marshal object %s/%s: %s", b.dataBucket, oid, err)
 	}
 
-        n, err := b.rgw.client.PutObject(b.dataBucket, section + "/" +id, bytes.NewReader(data), "application/json")
+        n, err := b.rgw.client.PutObject(b.dataBucket, oid, bytes.NewReader(data), "application/json")
         if err != nil {
-                glog.Errorf("Error failed to PutObject() %s/%s: %s", section, id, err)
-                return fmt.Errorf("Error failed to PutObject() %s/%s", section, id)
+                return retErrInfof("Error failed to PutObject() %s/%s", b.dataBucket, oid)
         }
         if n != int64(len(data)) {
-                glog.Errorf("Error PutObject() unexpected num of bytes written %s/%s: expected %d wrote %d", section, id, len(data), n)
-                return fmt.Errorf("Error PutObject() unexpected num of bytes written %s/%s: expected %d wrote %d", section, id, len(data), n)
+                return retErrInfof("Error PutObject() unexpected num of bytes written %s/%s: expected %d wrote %d", b.dataBucket, oid, len(data), n)
         }
         return nil
 }
 
-func (b *broker) readInfo(section, id string, object interface{}) error {
-        r, err := b.rgw.client.GetObject(b.dataBucket, section + "/" + id)
+func (b *broker) readInfo(oid string, object interface{}) error {
+        r, err := b.rgw.client.GetObject(b.dataBucket, oid)
         if err != nil {
-                return retErrInfof("Error failed to GetObject() %s/%s: %s", section, id, err)
+                return retErrInfof("Error failed to GetObject() %s/%s: %s", b.dataBucket, oid, err)
         }
 
 	buf, err := ioutil.ReadAll(r)
 	if err != nil {
-                return retErrInfof("Error failed to ReadAll() %s/%s: %s", section, id, err)
+                return retErrInfof("Error failed to ReadAll() %s/%s: %s", b.dataBucket, oid, err)
 	}
 
 	err = json.Unmarshal(buf, &object)
 	if err != nil {
-                return retErrInfof("Error failed to unmarshal object %s/%s: %s", section, id, err)
+                return retErrInfof("Error failed to unmarshal object %s/%s: %s", b.dataBucket, oid, err)
 	}
         return nil
 }
 
-func (b *broker) removeInfo(section, id string) error {
-        err := b.rgw.client.RemoveObject(b.dataBucket, section + "/" + id)
+func (b *broker) removeInfo(oid string) error {
+        err := b.rgw.client.RemoveObject(b.dataBucket, oid)
         if err != nil {
-                return retErrInfof("Error failed to RemoveObject() %s/%s: %s", section, id, err)
+                return retErrInfof("Error failed to RemoveObject() %s/%s: %s", b.dataBucket, oid, err)
         }
         return nil
 }
 
+func getInstanceOid(instanceId string) string {
+        return "instance/" + instanceId
+}
+
+func getBindOid(instanceId, bindId string) string {
+        return "bind/" + instanceId + "/" + bindId
+}
 
 func (b *broker) storeInstanceInfo(id string, info rgwServiceInstance) error {
-        return b.storeInfo("instance", id, info)
+        return b.storeInfo(getInstanceOid(id), info)
 }
 
 func (b *broker) getInstanceInfo(id string) (*rgwServiceInstance, error) {
         info := new(rgwServiceInstance)
-        err := b.readInfo("instance", id, info)
+        err := b.readInfo(getInstanceOid(id), info)
         return info, err
 }
 
 func (b *broker) removeInstanceInfo(id string) error {
-        return b.removeInfo("instance", id)
+        return b.removeInfo(getInstanceOid(id))
 }
 
-func (rgw *RGWClient) rgwAdminRequestRaw(method, section string, params url.Values) (*http.Response, error) {
+func (b *broker) storeBindInfo(instanceId, bindId string, info rgwBindInfo) error {
+        return b.storeInfo(getBindOid(instanceId, bindId), info)
+}
+
+func (b *broker) getBindInfo(instanceId, bindId string) (*rgwBindInfo, error) {
+        info := new(rgwBindInfo)
+        err := b.readInfo(getBindOid(instanceId, bindId), info)
+        return info, err
+}
+
+func (b *broker) removeBindInfo(instanceId, bindId string) error {
+        return b.removeInfo(getBindOid(instanceId, bindId))
+}
+
+func (rgw *RGWClient) rgwAdminRequestRaw(method, section, resource string, params url.Values) (*http.Response, error) {
 	httpClient := &http.Client{
 		Timeout:   30 * time.Second,
 		Transport: http.DefaultTransport,
 	}
 
-        req_url := rgw.endpoint + "/admin/" + section + "?" + params.Encode()
+        resourceStr := ""
+        if resource != "" {
+                resourceStr = resource + "&"
+        }
+
+        req_url := rgw.endpoint + "/admin/" + section + "?" + resourceStr + params.Encode()
         glog.Infof("sending http request: %s", req_url)
 
 	req, err := http.NewRequest(method, req_url, bytes.NewReader(nil))
@@ -446,8 +524,8 @@ func (rgw *RGWClient) rgwAdminRequestRaw(method, section string, params url.Valu
         return resp, nil
 }
 
-func (rgw *RGWClient) rgwAdminRequest(method, section string, params url.Values) ([]byte, error) {
-        resp, err := rgw.rgwAdminRequestRaw(method, section, params)
+func (rgw *RGWClient) rgwAdminRequest(method, section, resource string, params url.Values) ([]byte, error) {
+        resp, err := rgw.rgwAdminRequestRaw(method, section, resource, params)
         if err != nil {
                 return nil, err
         }
@@ -468,7 +546,34 @@ func (rgw *RGWClient) rgwAdminRequest(method, section string, params url.Values)
         return body, nil
 }
 
-func (rgw *RGWClient) provisionUser(userName, displayName string, successIfExists bool) (*RGWUser, error) {
+type userInfo struct {
+        UserId  string    `json:"user_id"`
+        Keys    []struct {
+                AccessKey string  `json:"access_key"`
+                Secret string     `json:"secret_key"`
+        } `json:"keys"`
+}
+
+func (rgw *RGWClient) getUserInfo(userName string) (*userInfo, error) {
+        params := make(url.Values)
+	params.Set("uid", userName)
+        body, err := rgw.rgwAdminRequest("GET", "user", "", params)
+	if err != nil {
+		glog.Errorf("Error fetching user info: %v", err)
+                return nil, fmt.Errorf("Error fetching user info: %v", err)
+	}
+
+        userInfo := new(userInfo)
+        err = json.Unmarshal(body, userInfo)
+        if (err != nil) {
+                glog.Errorf("Error failed to unmarshal user info: %v", err)
+                return nil, fmt.Errorf("Error failed to unmarshal user info: %v", err)
+        }
+
+        return userInfo, nil
+}
+
+func (rgw *RGWClient) provisionUser(userName, displayName string, genAccessKey, successIfExists bool) (*RGWUser, error) {
 	glog.Infof("Creating user %q", userName)
 
 	// Set request parameters.
@@ -476,9 +581,13 @@ func (rgw *RGWClient) provisionUser(userName, displayName string, successIfExist
 	params.Set("uid", userName)
         params.Set("display-name", displayName)
         params.Set("key-type", "s3")
-        params.Set("generate-key", "true")
+        if genAccessKey {
+                params.Set("generate-key", "true")
+        } else {
+                params.Set("generate-key", "false")
+        }
 
-        resp, err := rgw.rgwAdminRequestRaw("PUT", "user", params)
+        resp, err := rgw.rgwAdminRequestRaw("PUT", "user", "", params)
 	if err != nil {
 		glog.Errorf("Error creating user: %v", err)
 		return nil, fmt.Errorf("Error creating user: %v", err)
@@ -489,40 +598,25 @@ func (rgw *RGWClient) provisionUser(userName, displayName string, successIfExist
                 return nil, fmt.Errorf("Error got http response: %v", resp.StatusCode)
 	}
 
-        params = make(url.Values)
-	params.Set("uid", userName)
-        body, err := rgw.rgwAdminRequest("GET", "user", params)
-	if err != nil {
-		glog.Errorf("Error fetching user info: %v", err)
-                return nil, fmt.Errorf("Error fetching user info: %v", err)
-	}
-
-        type userInfo struct {
-                UserId  string    `json:"user_id"`
-                Keys    []struct {
-                        AccessKey string  `json:"access_key"`
-                        Secret string     `json:"secret_key"`
-                } `json:"keys"`
-        }
-
-        res := userInfo{}
-        err = json.Unmarshal(body, &res)
+        uInfo, err := rgw.getUserInfo(userName)
         if (err != nil) {
-                glog.Errorf("Error failed to unmarshal user info: %v", err)
-                return nil, fmt.Errorf("Error failed to unmarshal user info: %v", err)
+                return nil, err
         }
-
-        if len(res.Keys) < 1 {
-                glog.Errorf("Error access key wasn't generated for user %s", userName)
-                return nil, fmt.Errorf("Error access key wasn't generated for user %s", userName)
-        }
-
-        glog.Infof("generated user %s (access_key=%s)", userName, res.Keys[0].AccessKey)
 
         user := new(RGWUser)
         user.name = userName
-        user.accessKey = res.Keys[0].AccessKey
-        user.secret = res.Keys[0].Secret
+
+        if genAccessKey {
+                if len(uInfo.Keys) < 1 {
+                        glog.Errorf("Error access key wasn't generated for user %s", userName)
+                        return nil, fmt.Errorf("Error access key wasn't generated for user %s", userName)
+                }
+
+                glog.Infof("generated user %s (access_key=%s)", userName, uInfo.Keys[0].AccessKey)
+
+                user.accessKey = uInfo.Keys[0].AccessKey
+                user.secret = uInfo.Keys[0].Secret
+        }
 
         return user, nil
 }
@@ -534,7 +628,7 @@ func (rgw *RGWClient) getBucketId(bucketName string) (string, error) {
 	params := make(url.Values)
         params.Set("key", "bucket:" + bucketName)
 
-        body, err := rgw.rgwAdminRequest("GET", "metadata", params)
+        body, err := rgw.rgwAdminRequest("GET", "metadata", "", params)
 	if err != nil {
 		glog.Errorf("Error fetching bucket metadata info: %v", err)
                 return "", fmt.Errorf("Error fetching bucket metadata info: %v", err)
@@ -561,8 +655,6 @@ func (rgw *RGWClient) getBucketId(bucketName string) (string, error) {
         return res.Data.Bucket.BucketId, nil
 }
 
-
-
 func (rgw *RGWClient) unlinkBucket(userName, bucketName string) error {
 	glog.Infof("Unlinking bucket %s/%s", userName, bucketName)
 
@@ -571,7 +663,7 @@ func (rgw *RGWClient) unlinkBucket(userName, bucketName string) error {
         params.Set("uid", userName)
         params.Set("bucket", bucketName)
 
-        _, err := rgw.rgwAdminRequest("POST", "bucket", params)
+        _, err := rgw.rgwAdminRequest("POST", "bucket", "", params)
 	if err != nil {
 		glog.Errorf("Error unlinking bucket %s: %v", bucketName, err)
 		return fmt.Errorf("Error unlinking bucket %s: %v", bucketName, err)
@@ -589,7 +681,7 @@ func (rgw *RGWClient) linkBucket(userName, bucketName, bucketId string) error {
         params.Set("bucket", bucketName)
         params.Set("bucket-id", bucketId)
 
-        _, err := rgw.rgwAdminRequest("PUT", "bucket", params)
+        _, err := rgw.rgwAdminRequest("PUT", "bucket", "", params)
 	if err != nil {
 		glog.Errorf("Error linking bucket %s: %v", bucketName, err)
 		return fmt.Errorf("Error linking bucket %s: %v", bucketName, err)
@@ -606,10 +698,100 @@ func (rgw *RGWClient) suspendUser(userName string) error {
 	params.Set("uid", userName)
         params.Set("suspended", "true")
 
-        _, err := rgw.rgwAdminRequest("POST", "user", params)
+        _, err := rgw.rgwAdminRequest("POST", "user", "", params)
 	if err != nil {
 		glog.Errorf("Error creating user: %v", err)
 		return fmt.Errorf("Error creating user: %v", err)
+	}
+
+        return nil
+}
+
+var alphaChars = []rune("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+func getRand(max int) (int, error) {
+        buf := make([]byte, 4)
+        _, err := rand.Read(buf)
+        if err != nil {
+                return -1, err
+        }
+
+        val := binary.BigEndian.Uint32(buf)
+
+        return int(val) % max, nil
+}
+
+
+func getRandAlpha(size int) (string, error) {
+        buf := make([]rune, size)
+        for i := range buf {
+                r, err := getRand(len(alphaChars))
+                if err != nil {
+                        return "", retErrInfof("Error: failed to generate random number: %s", err)
+                }
+                buf[i] = alphaChars[r]
+        }
+        return string(buf), nil
+}
+
+func (rgw *RGWClient) createKey(userName string) (*RGWUser, error) {
+	glog.Infof("Creating new key for user %q", userName)
+
+
+        accessKey, err := getRandAlpha(20)
+        if err != nil {
+                return nil, retErrInfof("Error failed to generate access key: %s", err)
+        }
+
+	// Set request parameters.
+	params := make(url.Values)
+	params.Set("uid", userName)
+        params.Set("access-key", accessKey)
+        params.Set("key-type", "s3")
+        params.Set("generate-key", "true")
+
+        _, err = rgw.rgwAdminRequest("PUT", "user", "key", params)
+	if err != nil {
+		return nil, retErrInfof("Error generating access key: %v", err)
+	}
+
+        uInfo, err := rgw.getUserInfo(userName)
+        if (err != nil) {
+                return nil, err
+        }
+
+        secret := ""
+
+        for _, k := range uInfo.Keys {
+                if k.AccessKey == accessKey {
+                        secret = k.Secret
+                        break
+                }
+        }
+
+        if secret == "" {
+                return nil, retErrInfof("Error: can't find generated access key (user=%s access_key=%s)", userName, accessKey)
+        }
+
+        user := new(RGWUser)
+        user.name = userName
+        user.accessKey = accessKey
+        user.secret = secret
+
+        return user, nil
+}
+
+func (rgw *RGWClient) removeKey(userName, accessKey string) error {
+        glog.Infof("Removing accessKey %s:%s", userName, accessKey)
+
+	// Set request parameters.
+	params := make(url.Values)
+	params.Set("uid", userName)
+        params.Set("access-key", accessKey)
+
+        _, err := rgw.rgwAdminRequest("DELETE", "user", "key", params)
+	if err != nil {
+		return retErrInfof("Error removing access key: %v", err)
 	}
 
         return nil
