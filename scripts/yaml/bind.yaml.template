@@ -1,0 +1,8 @@
+apiVersion: servicecatalog.k8s.io/v1beta1
+kind: ServiceBinding
+metadata:
+  name: rgw-bucket-bind-{count}-{bind}
+  namespace: test-ns
+spec:
+  instanceRef:
+    name: rgw-bucket-instance-{count}

@@ -1,0 +1,13 @@
+apiVersion: servicecatalog.k8s.io/v1beta1
+kind: ClusterServiceBroker
+metadata:
+  name: rgw-bucket-broker
+spec:
+  url: http://172.17.8.101:{port}
+  env:
+  - name: RGW_ENDPOINT
+    value: 10.17.112.2:8000
+  - name: RGW_ACCESS_KEY
+    value: blablabla
+  - name: RGW_SECRET
+    value: shhhhh
