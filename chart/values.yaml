@@ -3,7 +3,7 @@
 # Specify
 #   --set image=gcr.io/openshift-gce-devel/rgw-obj-broker:<tag> 
 # with `helm install` to use a non-default version. Useful for running WIP images.
-image: 172.17.8.1:5000/rgw-obj-broker:03f0122-dirty-73
+image: 172.17.8.1:5000/rgw-obj-broker:7e94541-dirty-80
 # ImagePullPolicy; valid values are "IfNotPresent", "Never", and "Always"
 imagePullPolicy: Always
 
