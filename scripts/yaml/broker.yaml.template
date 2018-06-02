@@ -3,11 +3,4 @@ kind: ClusterServiceBroker
 metadata:
   name: rgw-bucket-broker
 spec:
-  url: http://172.17.8.101:{port}
-  env:
-  - name: RGW_ENDPOINT
-    value: 10.17.112.2:8000
-  - name: RGW_ACCESS_KEY
-    value: blablabla
-  - name: RGW_SECRET
-    value: shhhhh
+  url: http://{addr}
