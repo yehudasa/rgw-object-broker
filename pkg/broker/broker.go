@@ -190,13 +190,13 @@ func (b *broker) Catalog() (*brokerapi.Catalog, error) {
 		Services: []*brokerapi.Service{
 			{
 				Name:        "rgw-bucket-service",
-				ID:          "0",
+				ID:          "3594c8a0-5aad-42b6-8809-dc367d1bbaed",
 				Description: "A bucket of storage object backed by Ceph RGW.",
 				Bindable:    true,
 				Plans: []brokerapi.ServicePlan{
 					{
 						Name:        "default",
-						ID:          "0",
+						ID:          "3594c8a0-5aad-42b6-8809-dc367d1bbaed",
 						Description: "The best plan, and the only one.",
 						Free:        true,
 					},
