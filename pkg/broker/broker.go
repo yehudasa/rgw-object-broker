@@ -331,6 +331,11 @@ func (b *broker) RemoveServiceInstance(instanceID, serviceID, planID string, acc
                 if err != nil {
                         return nil, fmt.Errorf("Error failed to unlink bucket %s/%s: %v", userName, bucketName, err)
                 }
+
+                err = b.rgw.removeUser(userName)
+                if err != nil {
+                        return nil, fmt.Errorf("Error failed to unlink bucket %s/%s: %v", userName, bucketName, err)
+                }
         }
 
         err = b.removeInstanceInfo(instanceID)
@@ -728,13 +733,26 @@ func (rgw *RGWClient) suspendUser(userName string) error {
 
         _, err := rgw.rgwAdminRequest("POST", "user", "", params, nil)
 	if err != nil {
-		glog.Errorf("Error creating user: %v", err)
-		return fmt.Errorf("Error creating user: %v", err)
+		return retErrInfof("Error suspending user: %v", err)
 	}
 
         return nil
 }
 
+func (rgw *RGWClient) removeUser(userName string) error {
+	glog.Infof("Removing user %q", userName)
+
+	// Set request parameters.
+	params := make(url.Values)
+	params.Set("uid", userName)
+
+        _, err := rgw.rgwAdminRequest("DELETE", "user", "", params, nil)
+	if err != nil {
+		return retErrInfof("Error removing user: %v", err)
+	}
+
+        return nil
+}
 var alphaChars = []rune("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
 func getRand(max int) (int, error) {
