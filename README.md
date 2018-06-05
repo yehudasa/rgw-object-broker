@@ -165,7 +165,7 @@ Note the generated access key and secret key pairs that were generated for that 
 
 4. Install the RGW service broker
 
-Update charts/values.yaml.template with the RGW endpoint, and the admin user's credentials (and any other settings if needed).
+Update charts/values.yaml.template with the RGW endpoint, the RGW ZoneGroup, and the admin user's credentials (and any other settings if needed).
 
     $ make broker
 

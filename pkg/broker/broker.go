@@ -32,7 +32,6 @@ import (
 	"net/url"
 	"sync"
 	"github.com/kubernetes-incubator/service-catalog/pkg/brokerapi"
-        // metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
         "github.com/aws/aws-sdk-go/aws"
         "github.com/aws/aws-sdk-go/aws/credentials"
         "github.com/aws/aws-sdk-go/aws/session"
@@ -91,14 +90,18 @@ func (c *RGWClient) init() error {
 func (c *RGWClient) createBucket(bucketName string) error {
 	glog.Infof("Creating bucket %q", bucketName)
 
+        config := s3.CreateBucketConfiguration{
+                LocationConstraint: &c.zonegroup,
+        }
+
         input := s3.CreateBucketInput{
                 Bucket: &bucketName,
+                CreateBucketConfiguration: &config,
         }
 
 	_, err := c.client.CreateBucket(&input)
 	if err != nil {
-		glog.Errorf("Error creating bucket: %v", err)
-		return fmt.Errorf("S3-Client.MakeBucket err: %v", err)
+		return retErrInfof("Error creating bucket: %v", err)
 	}
 	glog.Infof("Create bucket %q succeeded.", bucketName)
 	return nil
@@ -274,6 +277,7 @@ func (b *broker) CreateServiceInstance(instanceID string, req *brokerapi.CreateS
         newClient := RGWClient{
                 user: *newUser,
                 endpoint: b.rgw.endpoint,
+                zonegroup: b.rgw.zonegroup,
         }
         err = newClient.init()
         if err != nil {
@@ -870,7 +874,7 @@ func (rgw *RGWClient) removeKey(userName, accessKey string) error {
 
 // Returns a S3 api client.
 func getS3Client(user RGWUser, endpoint, region string) (*s3.S3, error) {
-	glog.Infof("Creating s3 client based on: \"%s\" on endpoint %s", user.accessKey, endpoint)
+        glog.Infof("Creating s3 client based on: \"%s\" on endpoint %s (%s)", user.accessKey, endpoint, region)
 
         addr := endpoint
         noSSL := false
