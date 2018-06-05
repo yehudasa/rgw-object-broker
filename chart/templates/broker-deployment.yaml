@@ -48,6 +48,8 @@ spec:
         env:
         - name: RGW_ENDPOINT
           value: {{ .Values.RGWEndpoint }}
+        - name: RGW_ZONEGROUP
+          value: {{ .Values.RGWZoneGroup }}
         - name: RGW_ACCESS_KEY
           value: {{ .Values.RGWAccessKey }}
         - name: RGW_SECRET

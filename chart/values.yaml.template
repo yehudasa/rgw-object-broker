@@ -9,6 +9,7 @@ imagePullPolicy: Always
 
 # Endpoint related secrets should be here
 RGWEndpoint: http://10.17.112.2:8000
+RGWZoneGroup: a
 RGWAccessKey: KWB4HK2NTY4D0YR7
 RGWSecret: Fjg7ACac4uCVhxZcFkOeJofXUM7tXdQW
 RGWUIDPrefix: mykube-

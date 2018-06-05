@@ -32,9 +32,13 @@ import (
 	"net/url"
 	"sync"
 	"github.com/kubernetes-incubator/service-catalog/pkg/brokerapi"
-	"github.com/minio/minio-go"
-	"github.com/minio/minio-go/pkg/s3signer"
         // metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+        "github.com/aws/aws-sdk-go/aws"
+        "github.com/aws/aws-sdk-go/aws/credentials"
+        "github.com/aws/aws-sdk-go/aws/session"
+        "github.com/aws/aws-sdk-go/aws/signer/v4"
+        "github.com/aws/aws-sdk-go/service/s3"
+        "github.com/aws/aws-sdk-go/service/s3/s3manager"
 	clientset "k8s.io/client-go/kubernetes"
 	k8sRest "k8s.io/client-go/rest"
 )
@@ -68,12 +72,13 @@ type RGWUser struct {
 
 type RGWClient struct {
         endpoint        string
+        zonegroup       string
         user            RGWUser
-        client          *minio.Client
+        client          *s3.S3
 }
 
 func (c *RGWClient) init() error {
-        client, err := getS3Client(c.user, c.endpoint)
+        client, err := getS3Client(c.user, c.endpoint, c.zonegroup)
 
         if err != nil {
                 return fmt.Errorf("getS3Client failed: %v", err)
@@ -85,9 +90,12 @@ func (c *RGWClient) init() error {
 // Creates an bucket
 func (c *RGWClient) createBucket(bucketName string) error {
 	glog.Infof("Creating bucket %q", bucketName)
-	location := "" // ignored for now...
-	// create new bucket
-	err := c.client.MakeBucket(bucketName, location)
+
+        input := s3.CreateBucketInput{
+                Bucket: &bucketName,
+        }
+
+	_, err := c.client.CreateBucket(&input)
 	if err != nil {
 		glog.Errorf("Error creating bucket: %v", err)
 		return fmt.Errorf("S3-Client.MakeBucket err: %v", err)
@@ -140,6 +148,8 @@ func CreateBroker() Broker {
                 switch pair[0] {
 		case "RGW_ENDPOINT":
                         client.endpoint = pair[1]
+		case "RGW_ZONEGROUP":
+                        client.zonegroup = pair[1]
 		case "RGW_ACCESS_KEY":
                         client.user.accessKey = pair[1]
 		case "RGW_SECRET":
@@ -151,6 +161,11 @@ func CreateBroker() Broker {
 		case "RGW_DATA_BUCKET":
                         dataBucket = pair[1]
 		}
+        }
+
+        if client.zonegroup == "" {
+                glog.Infof("NOTICE: RGWZoneGroup was not configured, using 'default'.")
+                client.zonegroup = "default"
         }
 
 	// get the s3 client
@@ -429,30 +444,32 @@ func (b *broker) storeInfo(oid string, object interface{}) error {
 	data, err := json.Marshal(object)
 	if err != nil {
                 return retErrInfof("Error failed to marshal object %s/%s: %s", b.dataBucket, oid, err)
-	}
-
-        n, err := b.rgw.client.PutObject(b.dataBucket, oid, bytes.NewReader(data), "application/json")
-        if err != nil {
-                return retErrInfof("Error failed to PutObject() %s/%s", b.dataBucket, oid)
         }
-        if n != int64(len(data)) {
-                return retErrInfof("Error PutObject() unexpected num of bytes written %s/%s: expected %d wrote %d", b.dataBucket, oid, len(data), n)
+
+        uploader := s3manager.NewUploaderWithClient(b.rgw.client)
+
+        _, err = uploader.Upload(&s3manager.UploadInput{
+                Bucket: &b.dataBucket,
+                Key:    &oid,
+                Body:   bytes.NewReader(data),
+                ContentType: aws.String("application/json"),
+        })
+        if err != nil {
+                return retErrInfof("Error failed to upload data to %s/%s: %s", b.dataBucket, oid, err)
         }
         return nil
 }
 
 func (b *broker) readInfo(oid string, object interface{}) error {
-        r, err := b.rgw.client.GetObject(b.dataBucket, oid)
-        if err != nil {
-                return retErrInfof("Error failed to GetObject() %s/%s: %s", b.dataBucket, oid, err)
-        }
+        downloader := s3manager.NewDownloaderWithClient(b.rgw.client)
 
-	buf, err := ioutil.ReadAll(r)
-	if err != nil {
-                return retErrInfof("Error failed to ReadAll() %s/%s: %s", b.dataBucket, oid, err)
-	}
+        buf := &aws.WriteAtBuffer{}
+        _, err := downloader.Download(buf, &s3.GetObjectInput{
+                Bucket: &b.dataBucket,
+                Key: &oid,
+        })
 
-	err = json.Unmarshal(buf, &object)
+	err = json.Unmarshal(buf.Bytes(), &object)
 	if err != nil {
                 return retErrInfof("Error failed to unmarshal object %s/%s: %s", b.dataBucket, oid, err)
 	}
@@ -460,9 +477,13 @@ func (b *broker) readInfo(oid string, object interface{}) error {
 }
 
 func (b *broker) removeInfo(oid string) error {
-        err := b.rgw.client.RemoveObject(b.dataBucket, oid)
+        req, _ := b.rgw.client.DeleteObjectRequest(&s3.DeleteObjectInput{
+                Bucket: &b.dataBucket,
+                Key: &oid,
+        })
+        err := req.Send()
         if err != nil {
-                return retErrInfof("Error failed to RemoveObject() %s/%s: %s", b.dataBucket, oid, err)
+                return retErrInfof("Error failed when deleting object %s/%s: %s", b.dataBucket, oid, err)
         }
         return nil
 }
@@ -523,7 +544,10 @@ func (rgw *RGWClient) rgwAdminRequestRaw(method, section, resource string, param
 		return nil, fmt.Errorf("Error creating http request params=%v", params)
 	}
 
-        req = s3signer.SignV4(*req, rgw.user.accessKey, rgw.user.secret, "", "")
+        token := ""
+        s := v4.NewSigner(credentials.NewStaticCredentials(rgw.user.accessKey, rgw.user.secret, token))
+
+        _, err = s.Sign(req, nil, "s3", "default", time.Now())
 	if req.Header.Get("Authorization") == "" {
 		glog.Errorf("Error signing request: Authorization header is missing")
 		return nil, fmt.Errorf("Error signing request: Authorization header is missing")
@@ -844,29 +868,47 @@ func (rgw *RGWClient) removeKey(userName, accessKey string) error {
 }
 
 
-// Returns a minio api client.
-func getS3Client(user RGWUser, endpoint string) (*minio.Client, error) {
+// Returns a S3 api client.
+func getS3Client(user RGWUser, endpoint, region string) (*s3.S3, error) {
 	glog.Infof("Creating s3 client based on: \"%s\" on endpoint %s", user.accessKey, endpoint)
 
         addr := endpoint
-        useSSL := false
+        noSSL := false
 
         pair := strings.Split(endpoint, "://")
 
         if len(pair) > 1 {
-	        useSSL = (pair[0] == "https")
+	        noSSL = (pair[0] == "http")
                 addr = pair[1]
-
         }
 
-        glog.Infof("  addr=%s (ssl=%t)", addr, useSSL)
 
-	minioClient, err := minio.NewV2(addr, user.accessKey, user.secret, useSSL)
-	if err != nil {
-		return nil, fmt.Errorf("Unable to create S3 client instance: %v", err)
-	}
+        pathStyle := true
+        token := ""
+        creds := credentials.NewStaticCredentials(user.accessKey, user.secret, token)
+        sess, err := session.NewSessionWithOptions(session.Options{
+                Config: aws.Config{
+                        Region: &region,
+                        Credentials: creds,
+                        Endpoint: &endpoint,
+                        DisableSSL: &noSSL,
+                        S3ForcePathStyle: &pathStyle,
 
-	return minioClient, nil
+
+                },
+                // Profile: "profile_name",
+        })
+
+        glog.Infof("  addr=%s (ssl=%t)", addr, !noSSL)
+
+        if err != nil {
+                return nil, fmt.Errorf("Unable to create S3 session instance: %v", err)
+        }
+
+        s3Client := s3.New(sess)
+
+        return s3Client, nil
+
 }
 
 // Returns a k8s api client.
