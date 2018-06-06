@@ -32,7 +32,7 @@ image: $(BUILD_DIR)/Dockerfile
 	# docker tag $(IMAGE) $(REGISTRY)/$(IMAGE):v1
 	rm -rf $(TEMP_BUILD_DIR)
 
-values: $(BUILD_COUNT_FILE) chart/values.yaml
+values: $(BUILD_COUNT_FILE) chart/values.yaml.template
 	$(shell cat chart/values.yaml.template | sed s/{release}/$(DIRTY_HASH)/g | sed s/{registry}/$(REGISTRY)/g > chart/values.yaml)
 
 # push IMAGE:$(DIRTY_HASH). Intended to push broker built from non-master / working branch.
