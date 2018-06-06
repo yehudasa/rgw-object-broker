@@ -177,6 +177,12 @@ func CreateBroker() Broker {
 		glog.Fatalf("failed to get s3 client: %v\n", err)
 	}
 
+        _, err = client.readPeriod(nil)
+        if (err != nil) {
+                glog.Fatalf("Error: failed to fetch period: $v\n", err)
+                return nil
+        }
+
         if gcUser == "" {
                 gcUser = "rgw-kube-gc-user"
                 _, err := client.provisionUser(gcUser, "rgw-broker-gc-" + gcUser, false, true)
@@ -871,6 +877,54 @@ func (rgw *RGWClient) removeKey(userName, accessKey string) error {
         return nil
 }
 
+type rgwPeriod struct {
+        Id        string `json:"id"`
+        PeriodMap struct {
+                Zonegroups []struct {
+                        Id              string `json:"id"`
+                        Name            string `json:"name"`
+                        ApiName         string `json:"api_name"`
+                        IsMasterStr     string `json:"is_master"`
+                        Endpoints       []string `json:"endpoints"`
+                        Zones []struct {
+                                Id      string `json:"id"`
+                                Name    string `json:"name"`
+                                Endpoints []string `json:"endpoints"`
+                        } `json:"zones"`
+                        PlacementTargets []struct {
+                                Name    string `json:"string"`
+                                Tags    []string `json:"string"`
+                        } `json:"placement_targets"`
+                } `json:"zonegroups"`
+        } `json:"period_map"`
+        MasterZoneGroup string `json:"master_zonegroup"`
+        MasterZone      string `json:"master_zone"`
+        ReadlmId        string `json:"realm_id"`
+        RealmName       string `json:"realm_name"`
+}
+
+
+func (rgw *RGWClient) readPeriod(status *int) (*rgwPeriod, error) {
+	glog.Infof("Getting realm period configuration")
+
+	// Set request parameters.
+	params := make(url.Values)
+
+        body, err := rgw.rgwAdminRequest("GET", "realm/period", "", params, status)
+	if err != nil {
+                return nil, retErrInfof("Error fetching bucket metadata info: %v", err)
+	}
+
+        res := new(rgwPeriod)
+        err = json.Unmarshal(body, res)
+        if (err != nil) {
+                return nil, retErrInfof("Error failed to unmarshal bucket entrypoint info: %v", err)
+        }
+
+        glog.Infof("Retrieved period: %v)", *res)
+
+        return res, nil
+}
 
 // Returns a S3 api client.
 func getS3Client(user RGWUser, endpoint, region string) (*s3.S3, error) {
