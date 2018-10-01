@@ -159,7 +159,7 @@ The service catalog wil be deployed on Kubernetes cluster _k1_.
 
 3. Create RGW user that will be used as the admin user
 
-`[k2] $ radosgw-admin user create --uid=kube-broker --caps="metadata=read,write;users=read,write,buckets=read,write"`
+`[k2] $ radosgw-admin user create --uid=kube-broker --caps="metadata=read,write;users=read,write;buckets=read,write"`
 
 Note the generated access key and secret key pairs that were generated for that user
 
